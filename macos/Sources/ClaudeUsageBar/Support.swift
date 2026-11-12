@@ -89,6 +89,9 @@ enum Keychain {
     @Published var lidOnlyOnPower: Bool { didSet { d.set(lidOnlyOnPower, forKey: "lidOnlyOnPower") } }
     @Published var lidBatteryFloor: Int { didSet { d.set(lidBatteryFloor, forKey: "lidBatteryFloor") } }
     @Published var lidMaxHours: Int { didSet { d.set(lidMaxHours, forKey: "lidMaxHours") } }
+    /// How scheduled Claude Code runs are shown: "desktop" (headless, then opened in the Claude app),
+    /// "terminal" (a Terminal window running Claude Code) or "app" (headless; watch it in the Schedule tab).
+    @Published var codeRunDisplay: String { didSet { d.set(codeRunDisplay, forKey: "codeRunDisplay") } }
 
     init(defaults: UserDefaults = .standard) {
         d = defaults
@@ -96,7 +99,8 @@ enum Keychain {
                               "thresholdNotifications": true, "notifyReset": true, "resetOnlyAfterWarning": true,
                               "checkDesktopUpdates": true, "keepAwakeForScheduled": true, "globalShortcut": true,
                               "showClaudeCode": true, "awakeWhileClaudeWorks": true, "lidClosedWhileClaudeWorks": false,
-                              "lidOnlyOnPower": false, "lidBatteryFloor": 25, "lidMaxHours": 8])
+                              "lidOnlyOnPower": false, "lidBatteryFloor": 25, "lidMaxHours": 8,
+                              "codeRunDisplay": "desktop"])
         refreshSeconds = max(60, d.integer(forKey: "refreshSeconds"))
         thresholdsText = d.string(forKey: "thresholds") ?? "80, 95"
         recentChats = d.integer(forKey: "recentChats")
@@ -113,6 +117,7 @@ enum Keychain {
         lidOnlyOnPower = d.bool(forKey: "lidOnlyOnPower")
         lidBatteryFloor = d.integer(forKey: "lidBatteryFloor")
         lidMaxHours = max(1, d.integer(forKey: "lidMaxHours"))
+        codeRunDisplay = ["app", "terminal", "desktop"].contains(d.string(forKey: "codeRunDisplay") ?? "") ? d.string(forKey: "codeRunDisplay")! : "desktop"
     }
 
     /// Non-secret preferences for backups (no Keychain items, no account data).
@@ -122,7 +127,7 @@ enum Keychain {
          "resetOnlyAfterWarning": resetOnlyAfterWarning, "checkDesktopUpdates": checkDesktopUpdates,
          "keepAwakeForScheduled": keepAwakeForScheduled, "globalShortcut": globalShortcut, "showClaudeCode": showClaudeCode,
          "awakeWhileClaudeWorks": awakeWhileClaudeWorks, "lidOnlyOnPower": lidOnlyOnPower,
-         "lidBatteryFloor": lidBatteryFloor, "lidMaxHours": lidMaxHours]
+         "lidBatteryFloor": lidBatteryFloor, "lidMaxHours": lidMaxHours, "codeRunDisplay": codeRunDisplay]
     }
 
     /// Applies a backed-up settings dictionary; unknown or wrongly typed values are ignored.
@@ -143,6 +148,7 @@ enum Keychain {
         if let v = d["lidOnlyOnPower"] as? Bool { lidOnlyOnPower = v }
         if let v = d["lidBatteryFloor"] as? Int { lidBatteryFloor = min(80, max(5, v)) }
         if let v = d["lidMaxHours"] as? Int { lidMaxHours = min(24, max(1, v)) }
+        if let v = d["codeRunDisplay"] as? String, ["app", "terminal", "desktop"].contains(v) { codeRunDisplay = v }
     }
 
     /// "80, 95" -> [80, 95]; invalid entries dropped, clamped to 1…100.

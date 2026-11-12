@@ -67,3 +67,13 @@ final class BackupTests: XCTestCase {
         XCTAssertTrue(left.contains("README.txt"))
     }
 }
+
+final class BackupSyncAppTests: XCTestCase {
+    func testSyncAppForPath() {
+        XCTAssertEqual(Backup.syncApp(forPath: "/Users/x/Library/CloudStorage/GoogleDrive-me@example.com/My Drive")?.bundleIds, ["com.google.drivefs"])
+        XCTAssertEqual(Backup.syncApp(forPath: "/Users/x/Library/CloudStorage/Dropbox")?.name, "Dropbox")
+        XCTAssertEqual(Backup.syncApp(forPath: "/Users/x/Library/CloudStorage/OneDrive-Personal")?.name, "OneDrive")
+        XCTAssertNil(Backup.syncApp(forPath: "/Users/x/Library/Mobile Documents/com~apple~CloudDocs"), "iCloud Drive syncs by itself")
+        XCTAssertNil(Backup.syncApp(forPath: "/Users/x/Documents/Backups"))
+    }
+}

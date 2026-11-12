@@ -94,7 +94,7 @@ final class EfficiencyTests: XCTestCase {
     }
 
     func testPeakHoursInLocalTime() {
-        XCTAssertEqual(EfficiencyAnalyzer.peakHoursLocal(config, timeZone: TimeZone(identifier: "America/Chicago")!).hasPrefix("Mon–Fri "), true)
+        XCTAssertEqual(EfficiencyAnalyzer.peakHoursLocal(config, timeZone: TimeZone(identifier: "America/New_York")!).hasPrefix("Mon–Fri "), true)
         XCTAssertEqual(EfficiencyAnalyzer.peakHoursLocal(config, timeZone: utc), "Mon–Fri 12:00–18:00")
         let iv = EfficiencyAnalyzer.peakIntervals(from: date("2026-10-31T00:00:00Z"), to: date("2026-11-03T00:00:00Z"), config: config)
         XCTAssertEqual(iv.count, 1, "Sat/Sun skipped, Monday counted")

@@ -107,7 +107,7 @@ public struct CodeUsageLedger: Sendable {
         .sorted { $0.cost > $1.cost }
     }
 
-    /// "/Users/me/Who.ru" → "Who.ru"; scratch workspaces get a readable name.
+    /// "/Users/me/MyCode" → "MyCode"; scratch workspaces get a readable name.
     public static func displayName(_ path: String) -> String {
         if path.contains("/T/") || path.hasPrefix("/private/var/folders") { return "Temporary workspace" }
         let home = NSHomeDirectory()
@@ -253,11 +253,19 @@ public struct CodeRunResult: Sendable, Equatable {
             let text = json["result"].string ?? json["subtype"].string ?? ""
             let isError = json["is_error"].bool ?? (json["subtype"].string != "success")
             let lower = text.lowercased()
-            let limit = isError && (json["api_error_status"].int == 429 || lower.contains("usage limit") || lower.contains("limit reached"))
+            let limit = isError && (json["api_error_status"].int == 429 || lower.contains("usage limit") || lower.contains("limit reached")
+                                    || (lower.contains("hit your") && lower.contains("limit")))
             var reset: Date? = nil
             // "Claude AI usage limit reached|1762912800"
             if limit, let bar = text.lastIndex(of: "|"), let secs = Double(text[text.index(after: bar)...].trimmingCharacters(in: .whitespaces)) {
                 reset = Date(timeIntervalSince1970: secs)
+            }
+            // stream-json runs report the exact reset time in a rate_limit_event; otherwise read
+            // "resets 5:30am (America/New_York)" from the message.
+            if limit, reset == nil {
+                reset = stdout.split(separator: "\n").compactMap { CodeStreamEvent.parse(line: String($0)) }
+                    .last(where: { $0.limitRejected && $0.limitResetsAt != nil })?.limitResetsAt
+                    ?? CodeRunResult.resetFromText(text)
             }
             return CodeRunResult(success: !isError, text: text, sessionId: json["session_id"].string, limitHit: limit,
                                  limitResetsAt: reset, permissionDenials: json["permission_denials"].arrayOrEmpty.count)

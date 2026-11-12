@@ -142,8 +142,22 @@ of each window comes from claude.ai's weekly product split. Kept about a year in
 **Scheduled messages** (popover → Schedule…): queue a message for **Claude Code** to run when a limit
 resets (or at a time you pick). Pick the project, then a session in it (titles as Claude Code shows
 them) or a new session, and what it may do without approval (only already-allowed tools / also file
-edits / auto mode). It runs `claude -p --resume <session>` in the project folder with your message on
-stdin, using your own `claude` CLI and login, and waits for the whole task to finish.
+edits / auto mode), and how to show the run:
+- **In the Claude app** (default): it runs in the background (Schedule → **Watch** follows it live),
+  then opens the session in the Claude desktop app with everything it did. The Claude app doesn't
+  show changes made to a session it already has open, so if the session is open there at run time,
+  the message runs in a copy named "… (scheduled)" with the whole conversation, and that copy opens.
+- **In a Terminal window**: at the scheduled time a Terminal window opens running interactive
+  Claude Code (`claude --resume <session>`) with your message, so you can watch it and keep talking to
+  it afterwards. The app follows the session log to know when it's done.
+- **In this app only**: it runs `claude -p --output-format stream-json` in the background; Schedule →
+  **Watch** shows Claude's messages and tool calls live.
+
+Either way it uses your own `claude` CLI and login and waits for the whole task to finish. If Claude
+Code hits the usage limit partway, the app waits for the exact reset time it reports, then asks it to
+continue (instead of pasting your whole message again). **Open in Claude** shows the session in the
+Claude desktop app (`claude --desktop` can open a session there but can't send a message into it).
+Don't type into the same session elsewhere while a scheduled run is using it.
 Until the time comes the app keeps the Mac from idle-sleeping (the display can still turn off). At
 the time, it checks the limit really reset, sends the message, waits for the reply to finish,
 notifies you, and then stops holding the Mac awake, so it goes back to sleeping on its normal

@@ -309,7 +309,11 @@ import UsageCore
         }
         let dn = DistributedNotificationCenter.default()
         dn.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.setPaused(true, reason: "screen locked") }
+            Task { @MainActor in
+                // A queued message needs fresh usage (to see the limit reset), so keep checking while locked.
+                guard let self, self.scheduler.active.isEmpty else { return }
+                self.setPaused(true, reason: "screen locked")
+            }
         }
         dn.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.setPaused(false, reason: "screen unlocked") }

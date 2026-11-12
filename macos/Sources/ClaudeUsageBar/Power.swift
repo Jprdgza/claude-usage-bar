@@ -100,12 +100,15 @@ import IOKit.pwr_mgt
         // Awake (idle sleep only).
         setAssertion(effective && (s.awakeWhileClaudeWorks || s.lidClosedWhileClaudeWorks))
 
-        // Lid closed.
-        var wantLid = effective && s.lidClosedWhileClaudeWorks && helperInstalled
+        // Lid closed: also while a scheduled message is waiting for its time, so closing the lid
+        // at bedtime doesn't put the Mac to sleep before the message goes out.
+        let scheduledWaiting = model.scheduler.keepingAwake
+        var wantLid = (effective || scheduledWaiting) && s.lidClosedWhileClaudeWorks && helperInstalled
         let bat = Self.battery()
         if wantLid, s.lidOnlyOnPower, !bat.onAC { wantLid = false; note("Lid mode paused: on battery (Settings allows it only on the power adapter).") }
         if wantLid, !bat.onAC, let p = bat.percent, p < s.lidBatteryFloor { wantLid = false; note("Lid mode off: battery at \(p)%.") }
-        if wantLid, let since = lidSince, Date().timeIntervalSince(since) > Double(s.lidMaxHours) * 3600 {
+        // The hour limit counts Claude Code's working time only, not time spent waiting for a message's slot.
+        if wantLid, effective, let since = lidSince, Date().timeIntervalSince(since) > Double(s.lidMaxHours) * 3600 {
             wantLid = false; note("Lid mode off: reached the \(s.lidMaxHours)-hour maximum.")
         }
         let attemptKey = "\(wantLid)-\(helperInstalled)-\(s.lidClosedWhileClaudeWorks)"
@@ -115,13 +118,14 @@ import IOKit.pwr_mgt
                 lidFailedKey = nil
                 // Keep the start time when turning off for battery/time limits, so the time limit
                 // can't switch it straight back on. It resets only once Claude Code goes idle.
-                if wantLid, lidSince == nil { lidSince = Date() }
+                if wantLid, effective, lidSince == nil { lidSince = Date() }
             } else {
                 lidFailedKey = attemptKey
                 if !wantLid { note("Couldn't turn sleep back on automatically. Run: sudo pmset -a disablesleep 0") }
             }
         }
         if !effective { lidSince = nil }
+        else if lidModeActive, lidSince == nil { lidSince = Date() }   // started while waiting; Claude Code is working now
     }
 
     private func note(_ s: String) {

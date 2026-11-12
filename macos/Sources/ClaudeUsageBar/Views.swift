@@ -202,6 +202,9 @@ struct PopoverView: View {
                                                     : "Claude Code is working: Mac won't idle-sleep",
                   systemImage: PowerManager.shared.lidModeActive ? "laptopcomputer" : "cup.and.saucer")
                 .font(.caption).foregroundStyle(.secondary)
+        } else if PowerManager.shared.lidModeActive {
+            Label("Message scheduled: Mac stays on, even with the lid closed", systemImage: "laptopcomputer")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -628,7 +631,7 @@ struct PowerSection: View {
         Section("While Claude Code is working") {
             Toggle("Keep the Mac awake (no idle sleep; the display can still turn off)", isOn: $settings.awakeWhileClaudeWorks)
             Toggle("Keep running with the lid closed", isOn: $settings.lidClosedWhileClaudeWorks)
-                .help("macOS always sleeps on lid close unless sleep is disabled system-wide (pmset disablesleep). The app does that only while Claude Code is working and undoes it when it stops.")
+                .help("macOS always sleeps on lid close unless sleep is disabled system-wide (pmset disablesleep). The app does that only while Claude Code is working or a scheduled message is waiting, and undoes it afterwards.")
             if settings.lidClosedWhileClaudeWorks {
                 if !power.helperInstalled {
                     HStack {
@@ -643,7 +646,7 @@ struct PowerSection: View {
                     Stepper("On battery, stop below \(settings.lidBatteryFloor)%", value: $settings.lidBatteryFloor, in: 5...80, step: 5)
                     Stepper("Stop after \(settings.lidMaxHours) hours at most", value: $settings.lidMaxHours, in: 1...24)
                     HStack {
-                        Text(power.lidModeActive ? "On now: closing the lid won't sleep the Mac." : "Ready: turns on when Claude Code starts working.")
+                        Text(power.lidModeActive ? "On now: closing the lid won't sleep the Mac." : "Ready: turns on when Claude Code starts working or a scheduled message is waiting.")
                             .foregroundStyle(power.lidModeActive ? .orange : .secondary)
                         Spacer()
                         Button("Remove setup…") { helperStatus = power.removeHelper(); settings.lidClosedWhileClaudeWorks = false }
@@ -676,6 +679,13 @@ struct BackupSection: View {
                 Spacer()
                 Button("Back up now") { Task { await backup.backupNow() } }.disabled(backup.path == nil || backup.working)
                 Button("Restore…") { backup.restore() }
+            }
+            if let app = backup.syncAppNotRunning {
+                HStack {
+                    Text("\(app.name) isn't running, so backups saved to its folder don't upload.").foregroundStyle(.orange)
+                    Spacer()
+                    Button("Open \(app.name)") { backup.openSyncApp() }
+                }
             }
             Toggle("Back up automatically once a day", isOn: $backup.automatic)
             Toggle("Include queued messages (their text)", isOn: $backup.includeQueue)

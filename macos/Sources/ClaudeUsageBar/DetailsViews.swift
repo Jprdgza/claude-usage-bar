@@ -333,9 +333,17 @@ struct ScheduleTab: View {
                 Text("Auto mode (Claude Code decides what's safe)").tag("auto")
             }
             .frame(maxWidth: 420)
-            .help("Nobody is there to approve prompts, so anything needing approval is skipped (you'll see how many in the result). Runs `claude -p` in the project folder.")
+            .help("In a Terminal window, anything needing approval waits there for you. In the app only, nobody is there to approve, so it's skipped (you'll see how many in the result).")
+            Picker("Show the run", selection: $settings.codeRunDisplay) {
+                Text("In the Claude app (opens there when it finishes)").tag("desktop")
+                Text("In a Terminal window (watch and type to Claude Code live)").tag("terminal")
+                Text("In this app only (Schedule → Watch)").tag("app")
+            }
+            .frame(maxWidth: 420)
+            .help("Claude app: runs in the background (follow it live with Watch), then opens the session in the Claude app. Terminal: runs in an interactive Claude Code window that stays open. App only: background, Watch only.")
             if sessionId != "__new__" {
-                Text("If this session is open in Claude Desktop or a terminal, the reply is added to its log but that window won't show it until you reopen it.")
+                Label("The Claude app doesn't show changes made to a session it has open. If this session is open there when the message runs, it runs in a copy named \"… (scheduled)\" with the whole conversation, and that copy is what opens.",
+                      systemImage: "info.circle")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -380,6 +388,7 @@ struct ScheduleTab: View {
 struct JobRow: View {
     @EnvironmentObject var scheduler: Scheduler
     let job: ScheduledMessage
+    @State private var watching = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -401,10 +410,16 @@ struct JobRow: View {
                 if job.state == .failed {
                     Button(job.sentAt != nil ? "Send again (check the chat first: it may have gone through)" : "Retry now") { scheduler.sendNow(job.id) }
                 }
+                if job.isClaudeCode, scheduler.live[job.id] != nil { Button(job.state.isActive ? "Watch" : "Show what happened") { watching = true } }
+                if job.isClaudeCode, job.code?.sessionId != nil, !job.state.isActive {
+                    Button("Open in Claude") { scheduler.openInClaudeApp(job.id) }
+                        .help("Opens this session in the Claude desktop app so you can see everything it did.")
+                }
                 if !job.state.isActive { Button("Remove") { scheduler.remove(job.id) } }
             }
             .buttonStyle(.borderless).font(.caption)
         }
+        .sheet(isPresented: $watching) { CodeLiveView(jobId: job.id, title: job.conversationName).environmentObject(scheduler) }
         .padding(8)
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
     }
@@ -553,5 +568,56 @@ struct EfficiencyTab: View {
             Text("Windows that looked tighter: \(flagged.count) of \(data.filter { $0.verdict != nil }.count) (\(flagged.filter { $0.sample.mostlyPeak }.count) mostly in peak hours)")
                 .font(.caption).foregroundStyle(.red)
         }
+    }
+}
+
+/// What a scheduled Claude Code run is doing, as it happens: Claude's messages, tool calls and errors.
+struct CodeLiveView: View {
+    @EnvironmentObject var scheduler: Scheduler
+    @Environment(\.dismiss) private var dismiss
+    let jobId: UUID
+    let title: String
+
+    var body: some View {
+        let lines = scheduler.live[jobId] ?? []
+        let running = scheduler.job(jobId)?.state.isActive ?? false
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.headline).lineLimit(1)
+                if running { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(lines) { l in
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(Fmt.clock(l.time)).font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                                Image(systemName: icon(l.kind)).font(.caption).foregroundStyle(color(l.kind))
+                                Text(l.text).font(l.kind == .text ? .callout : .caption.monospaced())
+                                    .foregroundStyle(l.kind == .text ? .primary : color(l.kind))
+                                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            }
+                            .id(l.id)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onAppear { if let last = lines.last { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onChange(of: lines.count) { _, _ in if let last = lines.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } } }
+            }
+            Text("Shows Claude's messages and actions only. The full conversation is in the session (Open in Claude) or the Terminal window.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(minWidth: 560, minHeight: 420)
+    }
+
+    private func icon(_ k: CodeLiveLine.Kind) -> String {
+        switch k { case .text: return "text.bubble"; case .tool: return "hammer"; case .error: return "exclamationmark.triangle"; case .info: return "info.circle" }
+    }
+    private func color(_ k: CodeLiveLine.Kind) -> Color {
+        switch k { case .text: return .primary; case .tool: return .secondary; case .error: return .orange; case .info: return .blue }
     }
 }

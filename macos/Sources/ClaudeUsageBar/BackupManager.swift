@@ -25,6 +25,20 @@ import UsageCore
     weak var model: AppModel?
     private let log = DebugLog.shared
 
+    /// The cloud app that should upload the chosen folder, if it isn't running right now.
+    var syncAppNotRunning: Backup.SyncApp? {
+        guard let path, let app = Backup.syncApp(forPath: path) else { return nil }
+        let running = app.bundleIds.contains { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
+        return running ? nil : app
+    }
+
+    func openSyncApp() {
+        guard let app = Backup.syncApp(forPath: path ?? ""),
+              let url = app.bundleIds.lazy.compactMap({ NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }).first else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        Task { try? await Task.sleep(nanoseconds: 3_000_000_000); objectWillChange.send() }
+    }
+
     func refreshDestinations() {
         let home = NSHomeDirectory()
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: home + "/Library/CloudStorage"))?.filter { !$0.hasPrefix(".") } ?? []
@@ -69,8 +83,13 @@ import UsageCore
         case .success(let folder):
             lastBackup = now
             UserDefaults.standard.set(now, forKey: "backupLast")
-            status = "Backed up at \(Fmt.clock(now))."
-            log.add("Backup written to \(destinationName ?? "folder") (\(folder))")
+            if let app = syncAppNotRunning {
+                status = "Saved to your \(app.name) folder at \(Fmt.clock(now)), but \(app.name) isn't running, so it hasn't uploaded yet. Open \(app.name) and it will upload."
+                log.add("Backup written to \(destinationName ?? "folder") (\(folder)), but \(app.name) isn't running: not uploaded yet")
+            } else {
+                status = "Backed up at \(Fmt.clock(now))\(Backup.syncApp(forPath: path) != nil ? "; \(Backup.syncApp(forPath: path)!.name) will upload it shortly" : "")."
+                log.add("Backup written to \(destinationName ?? "folder") (\(folder))")
+            }
         case .failure(let e):
             status = "Backup failed: \(e.localizedDescription)"
             log.add("Backup failed: \(e.localizedDescription)")

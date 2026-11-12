@@ -13,6 +13,23 @@ public enum Backup {
     }
 
     public static let folderName = "Claude Usage Backup"
+
+    /// The Mac app that uploads a synced folder. Writing into the folder isn't enough on its own:
+    /// if this app isn't running, nothing reaches the cloud.
+    public struct SyncApp: Equatable, Sendable {
+        public var name: String
+        public var bundleIds: [String]
+    }
+
+    public static func syncApp(forPath path: String) -> SyncApp? {
+        let table: [(String, SyncApp)] = [
+            ("/Library/CloudStorage/GoogleDrive-", SyncApp(name: "Google Drive", bundleIds: ["com.google.drivefs"])),
+            ("/Library/CloudStorage/Dropbox", SyncApp(name: "Dropbox", bundleIds: ["com.getdropbox.dropbox"])),
+            ("/Library/CloudStorage/OneDrive", SyncApp(name: "OneDrive", bundleIds: ["com.microsoft.OneDrive", "com.microsoft.OneDrive-mac"])),
+            ("/Library/CloudStorage/Box-", SyncApp(name: "Box", bundleIds: ["com.box.desktop"])),
+        ]
+        return table.first { path.contains($0.0) }?.1   // iCloud Drive is part of macOS and always syncs
+    }
     public static let keepSnapshots = 14
 
     /// Files copied from the app's data folder (each optional).

@@ -32,6 +32,9 @@ public struct ScheduledMessage: Codable, Identifiable, Sendable, Equatable {
     public var createdConversationId: String?
     /// Set for a Claude Code job instead of a claude.ai chat. Optional, so older queue files still load.
     public var code: CodeTarget?
+    /// Set after a Claude Code run hit the usage limit: the next try asks it to continue instead of
+    /// pasting the whole message into the conversation again.
+    public var continueOnRetry: Bool?
 
     public struct CodeTarget: Codable, Sendable, Equatable {
         public var projectPath: String
