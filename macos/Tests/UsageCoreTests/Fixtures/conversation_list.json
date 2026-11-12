@@ -1,0 +1,5 @@
+[
+  { "uuid": "c1", "name": "Refactor parser", "model": "claude-opus-5-5", "updated_at": "2026-11-04T18:00:00.000000+00:00", "project_uuid": null, "unknown": 1 },
+  { "uuid": "c2", "name": "", "model": null, "updated_at": "2026-11-03T18:00:00Z", "project_uuid": "p1" },
+  { "name": "no uuid, skipped" }
+]

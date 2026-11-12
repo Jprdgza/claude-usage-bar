@@ -1,0 +1,17 @@
+{
+  "memory_mode": "melange",
+  "account": {
+    "uuid": "acct-1",
+    "settings": {
+      "enabled_saffron_search": true,
+      "enabled_bananagrams": false,
+      "enabled_mcp_tools": { "6f616b42-0ed8-571e-823f-ee4aca6b7ce9:show_widget": true, "other:tool": false },
+      "dismissed_banners": ["a", "b"]
+    },
+    "memberships": [
+      { "organization": { "uuid": "org-other", "name": "Other", "capabilities": ["api"] } },
+      { "organization": { "uuid": "org-1", "name": "Personal", "capabilities": ["chat", "claude_max"], "rate_limit_tier": "default_claude_max_5x", "raven_type": null } }
+    ]
+  },
+  "statsig": { "huge": true }
+}

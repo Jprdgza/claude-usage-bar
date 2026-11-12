@@ -1,0 +1,14 @@
+{
+  "five_hour": null,
+  "seven_day": null,
+  "limits": [
+    { "kind": "session", "group": "plan", "percent": 37, "severity": "normal", "resets_at": "2026-11-04T20:00:00+00:00", "scope": null, "is_active": true },
+    { "kind": "weekly_all", "percent": 12, "resets_at": "2026-11-08T09:00:00.123Z", "is_active": true },
+    { "kind": "weekly_scoped", "percent": 64, "resets_at": "2026-11-08T09:00:00Z", "scope": { "model": { "display_name": "Sonnet" } } },
+    { "kind": "daily_research", "percent": 90, "status": "exceeded", "resets_at": "2026-11-05T00:00:00Z", "scope": { "feature": "research" }, "brand_new_field": [1, 2] },
+    { "kind": "weekly_scoped", "resets_at": "2026-11-08T09:00:00Z" },
+    { "percent": 5 }
+  ],
+  "spend": { "enabled": true, "limit": { "amount_minor": 5000 }, "used": { "amount_minor": 1250 }, "balance": null },
+  "some_future_object": { "hello": "world" }
+}
