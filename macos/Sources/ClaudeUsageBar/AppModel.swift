@@ -6,7 +6,7 @@ import UsageCore
     enum Status: Equatable { case loggedOut, loading, ok, error(String), sessionExpired }
 
     let config: AppConfig
-    let settings = SettingsStore()
+    let settings: SettingsStore
     let log = DebugLog.shared
     let web: WebSession
     let notifier: Notifier
@@ -21,7 +21,7 @@ import UsageCore
     @Published private(set) var paused = false
     @Published private(set) var refreshing = false
     @Published private(set) var desktopNote: String?
-    @Published private(set) var hasAPIKey = Keychain.get(.anthropicAPIKey) != nil
+    @Published private(set) var hasAPIKey = false
     @Published private(set) var usingWebTransport = false
     @Published private(set) var history = UsageHistory()
     @Published private(set) var codeSession: [CodeProjectUsage] = []
@@ -30,7 +30,7 @@ import UsageCore
     @Published var detailsTab = "history"
     /// Long-term work-per-1 % per 5-hour window (efficiency.jsonl), newest last.
     @Published private(set) var efficiency: [EfficiencySample] = []
-    let scheduler = Scheduler()
+    let scheduler: Scheduler
     private let codeScanner = CodeLogScanner()
     private var codeScanning = false
 
@@ -45,8 +45,10 @@ import UsageCore
     private var chatCache: [String: (updatedAt: Date?, stats: ConversationStats)] = [:]
     private(set) var lastUsageRaw: JSON?
 
-    init() {
-        let loaded = ConfigLoader.load(overrideURL: AppPaths.configOverride)
+    init(demo: Bool = false) {
+        scheduler = Scheduler(demo: demo)
+        settings = demo ? SettingsStore(defaults: UserDefaults(suiteName: "ClaudeUsageBar.demo")!) : SettingsStore()
+        let loaded = ConfigLoader.load(overrideURL: demo ? nil : AppPaths.configOverride)
         config = loaded.config
         web = WebSession(config: loaded.config, log: DebugLog.shared)
         notifier = Notifier(log: DebugLog.shared)
@@ -56,11 +58,14 @@ import UsageCore
                 self?.log.add("claude.ai returned an HTML page to URLSession (likely a Cloudflare check); switched to the WebKit transport")
             }
         }
+        if demo { status = .ok; return }
+        hasAPIKey = Keychain.get(.anthropicAPIKey) != nil
         if let problem = loaded.problem { log.add(problem) }
         writeDefaultConfigCopy()
         loadHistory()
         efficiency = EfficiencyAnalyzer.parse((try? String(contentsOf: efficiencyFile, encoding: .utf8)) ?? "")
         scheduler.model = self
+        BackupManager.shared.model = self
         PowerManager.shared.model = self
         scheduler.settingsChanged()
         observeSystem()
@@ -197,6 +202,7 @@ import UsageCore
             recordHistory(snap)
             scheduler.usageUpdated(snap.windows)
             scanClaudeCode()
+            BackupManager.shared.backupIfDue()
             nextDue = Date().addingTimeInterval(settings.refreshInterval)
 
             await refreshChats(client: client, org: org)
@@ -489,6 +495,21 @@ import UsageCore
         guard let (client, org) = sendingContext() else { return [] }
         do { return ConversationListDecoder.decode(try await client.conversations(org: org, limit: limit)) }
         catch { log.add("Couldn't list chats for scheduling: \(error)"); return [] }
+    }
+
+    /// After a restore: re-read history and efficiency from disk.
+    func reloadFromDisk() {
+        loadHistory()
+        efficiency = EfficiencyAnalyzer.parse((try? String(contentsOf: efficiencyFile, encoding: .utf8)) ?? "")
+    }
+
+    // MARK: Demo (screenshots)
+
+    /// Fills the model with made-up data for README screenshots. Never used in normal runs.
+    func loadDemo(_ d: DemoData) {
+        account = d.account; usage = d.usage; lastUpdated = d.now; status = .ok
+        history = d.history; efficiency = d.efficiency
+        codeSession = d.codeSession; codeWeek = d.codeWeek; codeDay = d.codeWeek
     }
 
     // MARK: Derived

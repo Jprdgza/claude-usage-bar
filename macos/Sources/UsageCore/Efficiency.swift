@@ -21,6 +21,13 @@ public struct EfficiencySample: Codable, Identifiable, Sendable, Equatable {
 
     public static let minAttributedDelta = 3.0
 
+    public init(resetsAt: Date, start: Date, end: Date, sessionDelta: Double, codeFraction: Double,
+                codeCost: Double, codeTokens: Int, peakFraction: Double, finished: Bool) {
+        self.resetsAt = resetsAt; self.start = start; self.end = end; self.sessionDelta = sessionDelta
+        self.codeFraction = codeFraction; self.codeCost = codeCost; self.codeTokens = codeTokens
+        self.peakFraction = peakFraction; self.finished = finished
+    }
+
     /// 5-hour % points that Claude Code accounts for.
     public var attributedDelta: Double { sessionDelta * codeFraction }
 

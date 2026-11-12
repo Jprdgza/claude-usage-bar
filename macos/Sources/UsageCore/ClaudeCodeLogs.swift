@@ -60,6 +60,12 @@ public struct CodeProjectUsage: Identifiable, Sendable, Equatable {
     public var sessions: Int
     public var lastActive: Date
     public var topModel: String?
+
+    public init(path: String, name: String, tokens: Int, output: Int, cost: Double, share: Double,
+                sessions: Int, lastActive: Date, topModel: String?) {
+        self.path = path; self.name = name; self.tokens = tokens; self.output = output; self.cost = cost
+        self.share = share; self.sessions = sessions; self.lastActive = lastActive; self.topModel = topModel
+    }
 }
 
 /// Aggregation, kept separate from file I/O so it can be unit-tested.

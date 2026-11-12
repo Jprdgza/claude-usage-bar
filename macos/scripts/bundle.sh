@@ -1,18 +1,26 @@
 #!/bin/bash
 # Builds ClaudeUsageBar.app (release, ad-hoc signed) into macos/build/.
-# Usage: scripts/bundle.sh [--install]   (--install copies it to ~/Applications)
+# Usage: scripts/bundle.sh [--install] [--universal] [--zip]
+#   --install    copy it to ~/Applications
+#   --universal  Apple Silicon + Intel in one app (for downloads)
+#   --zip        also make build/ClaudeUsage-<version>.zip for a GitHub release
+# VERSION=x.y.z sets the version (default 0.2.0).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-swift build -c release --product ClaudeUsageBar
-BIN="$(swift build -c release --product ClaudeUsageBar --show-bin-path)/ClaudeUsageBar"
+INSTALL=0; UNIVERSAL=0; ZIP=0
+for a in "$@"; do case "$a" in --install) INSTALL=1;; --universal) UNIVERSAL=1;; --zip) ZIP=1;; esac; done
+ARCH=(); [[ $UNIVERSAL -eq 1 ]] && ARCH=(--arch arm64 --arch x86_64)
+
+swift build -c release --product ClaudeUsageBar ${ARCH[@]+"${ARCH[@]}"}
+BIN="$(swift build -c release --product ClaudeUsageBar ${ARCH[@]+"${ARCH[@]}"} --show-bin-path)/ClaudeUsageBar"
 
 APP="build/ClaudeUsageBar.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/ClaudeUsageBar"
 
-VERSION="0.1.0"
+VERSION="${VERSION:-0.2.0}"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,7 +46,14 @@ codesign --force --sign - --timestamp=none "$APP"
 codesign --verify --verbose=1 "$APP"
 echo "Built $(pwd)/$APP"
 
-if [[ "${1:-}" == "--install" ]]; then
+if [[ $ZIP -eq 1 ]]; then
+  ZIPFILE="build/ClaudeUsage-${VERSION}.zip"
+  rm -f "$ZIPFILE"
+  ditto -c -k --keepParent "$APP" "$ZIPFILE"   # ditto keeps the signature and bundle metadata intact
+  echo "Zipped $(pwd)/$ZIPFILE ($(lipo -archs "$APP/Contents/MacOS/ClaudeUsageBar"))"
+fi
+
+if [[ $INSTALL -eq 1 ]]; then
   mkdir -p "$HOME/Applications"
   rm -rf "$HOME/Applications/ClaudeUsageBar.app"
   cp -R "$APP" "$HOME/Applications/"

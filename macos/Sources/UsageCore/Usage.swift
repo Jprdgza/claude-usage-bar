@@ -78,10 +78,14 @@ public struct ExtraUsage: Sendable, Equatable {
 
 /// A split of one window's usage by product (e.g. `seven_day_breakdown`: Claude Code / Chats / Cowork).
 public struct UsageBreakdown: Sendable, Equatable, Identifiable {
-    public struct Row: Sendable, Equatable { public var name: String; public var percent: Double }
+    public struct Row: Sendable, Equatable {
+        public var name: String; public var percent: Double
+        public init(name: String, percent: Double) { self.name = name; self.percent = percent }
+    }
     public var id: String
     public var label: String
     public var rows: [Row]
+    public init(id: String, label: String, rows: [Row]) { self.id = id; self.label = label; self.rows = rows }
 }
 
 public struct UsageSnapshot: Sendable, Equatable {
@@ -94,6 +98,12 @@ public struct UsageSnapshot: Sendable, Equatable {
     public var format: Format
 
     public enum Format: String, Sendable { case limitsArray, legacyTopLevel, empty }
+
+    public init(windows: [UsageWindow], extra: ExtraUsage? = nil, breakdowns: [UsageBreakdown] = [],
+                ignoredKeys: [String] = [], format: Format = .limitsArray) {
+        self.windows = windows; self.extra = extra; self.breakdowns = breakdowns
+        self.ignoredKeys = ignoredKeys; self.format = format
+    }
 
     /// claude.ai reports nothing at all (the free plan answers 200 with all-null fields).
     public var isEmpty: Bool { windows.isEmpty && extra == nil }

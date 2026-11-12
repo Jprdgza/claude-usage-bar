@@ -38,8 +38,9 @@ struct HistoryTab: View {
                     Text("24 hours").tag(86400.0)
                     Text("7 days").tag(7 * 86400.0)
                     Text("30 days").tag(30 * 86400.0)
+                    Text("1 year").tag(365 * 86400.0)
                 }
-                .pickerStyle(.segmented).frame(width: 280)
+                .pickerStyle(.segmented).frame(width: 360)
                 Spacer()
                 Text("\(points.count) readings").font(.caption).foregroundStyle(.secondary)
             }
@@ -75,7 +76,7 @@ struct HistoryTab: View {
                 }
                 busiest(points: points)
             }
-            Text("Kept for 30 days in ~/Library/Application Support/ClaudeUsageBar/history.jsonl. Only percentages and times; nothing leaves your Mac.")
+            Text("Kept for about 13 months in ~/Library/Application Support/ClaudeUsageBar/history.jsonl. Only percentages, reset times and the product split; nothing leaves your Mac.")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
     }
@@ -447,6 +448,8 @@ struct EfficiencyTab: View {
     @State private var range: Double = 30 * 86400
     @State private var selected: Date?
 
+    init(selected: Date? = nil) { _selected = State(initialValue: selected) }
+
     struct Bar: Identifiable {
         var id: Date { sample.resetsAt }
         let sample: EfficiencySample
@@ -493,7 +496,8 @@ struct EfficiencyTab: View {
                     RuleMark(y: .value("Normal", 100)).foregroundStyle(.secondary).lineStyle(StrokeStyle(dash: [4, 4]))
                         .annotation(position: .top, alignment: .leading) { Text("your normal").font(.caption2).foregroundStyle(.secondary) }
                     ForEach(data) { bar in
-                        BarMark(x: .value("Window", bar.sample.resetsAt, unit: .hour), y: .value("Work per 1%", bar.percentOfNormal))
+                        BarMark(x: .value("Window", bar.sample.resetsAt), y: .value("Work per 1%", bar.percentOfNormal),
+                                width: .fixed(range <= 31 * 86400 ? 7 : range <= 91 * 86400 ? 3 : 1.5))
                             .foregroundStyle(color(bar.verdict))
                             .opacity(selected.map { abs($0.timeIntervalSince(bar.sample.resetsAt)) < 3 * 3600 ? 1 : 0.55 } ?? 1)
                     }

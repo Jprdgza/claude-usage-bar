@@ -11,6 +11,11 @@ struct ClaudeUsageBarApp: App {
     init() {
         // LSUIElement covers the bundled .app; this covers `swift run`.
         NSApplication.shared.setActivationPolicy(.accessory)
+        // `ClaudeUsageBar --render-screenshots <folder>`: README screenshots from made-up data, then exit.
+        if let i = CommandLine.arguments.firstIndex(of: "--render-screenshots"), i + 1 < CommandLine.arguments.count {
+            ScreenshotRenderer.run(into: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+            exit(0)
+        }
     }
 
     var body: some Scene {

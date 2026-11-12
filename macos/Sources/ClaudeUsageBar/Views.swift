@@ -495,6 +495,7 @@ struct SettingsView: View {
                     .onChange(of: settings.keepAwakeForScheduled) { _, _ in model.scheduler.settingsChanged() }
             }
             PowerSection(power: PowerManager.shared)
+            BackupSection(backup: BackupManager.shared)
             Section("Notifications") {
                 TextField("Warning thresholds (%)", text: $settings.thresholdsText)
                     .help("Comma-separated, e.g. 80, 95. One notification per threshold per window per reset period.")
@@ -654,5 +655,35 @@ struct PowerSection: View {
             if !helperStatus.isEmpty { Text(helperStatus).font(.caption) }
             if let n = power.lastNote { Text(n).font(.caption2).foregroundStyle(.secondary) }
         }
+    }
+}
+
+struct BackupSection: View {
+    @ObservedObject var backup: BackupManager
+
+    var body: some View {
+        Section("Backup") {
+            Picker("Back up to", selection: Binding(get: { backup.path ?? "" }, set: { backup.path = $0.isEmpty ? nil : $0 })) {
+                Text("Not set").tag("")
+                ForEach(backup.destinations) { d in Text(d.name).tag(d.path) }
+                if let p = backup.path, !backup.destinations.contains(where: { $0.path == p }) {
+                    Text((p as NSString).abbreviatingWithTildeInPath).tag(p)
+                }
+            }
+            .help("Google Drive, Dropbox, OneDrive, Box and iCloud Drive appear here when their Mac app is installed. Their app uploads the backup; this app never connects to them.")
+            HStack {
+                Button("Other folder…") { backup.chooseFolder() }
+                Spacer()
+                Button("Back up now") { Task { await backup.backupNow() } }.disabled(backup.path == nil || backup.working)
+                Button("Restore…") { backup.restore() }
+            }
+            Toggle("Back up automatically once a day", isOn: $backup.automatic)
+            Toggle("Include queued messages (their text)", isOn: $backup.includeQueue)
+            Text("Backs up usage history, efficiency, settings\(backup.includeQueue ? ", the message queue" : "") and any endpoints.json. Never your claude.ai login or API key (those stay in the Keychain). Keeps the last \(Backup.keepSnapshots) days. Restoring merges with what's here and never re-sends queued messages.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let s = backup.status { Text(s).font(.caption) }
+            else if let last = backup.lastBackup { Text("Last backup: \(Fmt.clock(last))").font(.caption).foregroundStyle(.secondary) }
+        }
+        .onAppear { backup.refreshDestinations() }
     }
 }

@@ -15,7 +15,8 @@ import UsageCore
     private var running: Set<UUID> = []
     private let file = AppPaths.support.appendingPathComponent("scheduled.json")
 
-    init() {
+    init(demo: Bool = false) {
+        if demo { return }   // demo mode: no file, no loop
         load()
         // Anything interrupted mid-send by a quit/crash: the message may or may not have gone out.
         for i in jobs.indices where jobs[i].state == .sending || jobs[i].state == .waitingForReply {
@@ -33,6 +34,14 @@ import UsageCore
     }
 
     var active: [ScheduledMessage] { jobs.filter { $0.state.isActive } }
+
+    func loadDemo(_ jobs: [ScheduledMessage]) { self.jobs = jobs }
+
+    /// Adds jobs from a backup (as cancelled, so nothing is re-sent).
+    func restore(_ backup: [ScheduledMessage]) {
+        jobs = Backup.mergeQueue(local: jobs, backup: backup)
+        save()
+    }
 
     // MARK: Queue management
 

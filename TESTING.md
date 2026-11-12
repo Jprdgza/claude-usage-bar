@@ -60,6 +60,13 @@ commit at the top of your notes.
 - [ ] Lid mode (after Set up…): while Claude Code works, `pmset -g | grep SleepDisabled` shows 1; closing the lid keeps
       the task running. After it goes idle, or after quitting the app, SleepDisabled is 0.
 
+## 4e. Backup
+- [ ] Settings → Backup lists the cloud folders on this Mac. Pick one, click Back up now: a
+      "Claude Usage Backup/<today>" folder appears with history.jsonl, settings.json, manifest.json.
+- [ ] No backup file contains "sessionKey", "sk-ant" or a cookie: `grep -r -i "sessionkey\|sk-ant" "<folder>/Claude Usage Backup"`.
+- [ ] Restore… from that folder: history and settings come back; restored queued messages show as Cancelled.
+- [ ] With automatic backups on, at most one backup a day appears; only the newest 14 days are kept.
+
 ## 5. Notifications
 - [ ] Settings shows no "macOS is blocking notifications" warning (or fix it with the button).
 - [ ] Temporarily set the thresholds to something just below the current 5-hour % (e.g. `1`): one warning

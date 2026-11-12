@@ -71,7 +71,7 @@ enum Keychain {
 
 /// Non-secret preferences (UserDefaults).
 @MainActor final class SettingsStore: ObservableObject {
-    private let d = UserDefaults.standard
+    private let d: UserDefaults
 
     @Published var refreshSeconds: Int { didSet { d.set(refreshSeconds, forKey: "refreshSeconds") } }
     @Published var thresholdsText: String { didSet { d.set(thresholdsText, forKey: "thresholds") } }
@@ -90,7 +90,8 @@ enum Keychain {
     @Published var lidBatteryFloor: Int { didSet { d.set(lidBatteryFloor, forKey: "lidBatteryFloor") } }
     @Published var lidMaxHours: Int { didSet { d.set(lidMaxHours, forKey: "lidMaxHours") } }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        d = defaults
         d.register(defaults: ["refreshSeconds": 60, "thresholds": "80, 95", "recentChats": 5, "showPercent": true,
                               "thresholdNotifications": true, "notifyReset": true, "resetOnlyAfterWarning": true,
                               "checkDesktopUpdates": true, "keepAwakeForScheduled": true, "globalShortcut": true,
@@ -114,6 +115,36 @@ enum Keychain {
         lidMaxHours = max(1, d.integer(forKey: "lidMaxHours"))
     }
 
+    /// Non-secret preferences for backups (no Keychain items, no account data).
+    func exported() -> [String: Any] {
+        ["refreshSeconds": refreshSeconds, "thresholds": thresholdsText, "recentChats": recentChats,
+         "showPercent": showPercentInMenuBar, "thresholdNotifications": thresholdNotifications, "notifyReset": notifyReset,
+         "resetOnlyAfterWarning": resetOnlyAfterWarning, "checkDesktopUpdates": checkDesktopUpdates,
+         "keepAwakeForScheduled": keepAwakeForScheduled, "globalShortcut": globalShortcut, "showClaudeCode": showClaudeCode,
+         "awakeWhileClaudeWorks": awakeWhileClaudeWorks, "lidOnlyOnPower": lidOnlyOnPower,
+         "lidBatteryFloor": lidBatteryFloor, "lidMaxHours": lidMaxHours]
+    }
+
+    /// Applies a backed-up settings dictionary; unknown or wrongly typed values are ignored.
+    /// Lid mode itself isn't restored: it needs its one-time setup on each Mac.
+    func apply(_ d: [String: Any]) {
+        if let v = d["refreshSeconds"] as? Int { refreshSeconds = max(60, v) }
+        if let v = d["thresholds"] as? String { thresholdsText = v }
+        if let v = d["recentChats"] as? Int { recentChats = min(20, max(0, v)) }
+        if let v = d["showPercent"] as? Bool { showPercentInMenuBar = v }
+        if let v = d["thresholdNotifications"] as? Bool { thresholdNotifications = v }
+        if let v = d["notifyReset"] as? Bool { notifyReset = v }
+        if let v = d["resetOnlyAfterWarning"] as? Bool { resetOnlyAfterWarning = v }
+        if let v = d["checkDesktopUpdates"] as? Bool { checkDesktopUpdates = v }
+        if let v = d["keepAwakeForScheduled"] as? Bool { keepAwakeForScheduled = v }
+        if let v = d["globalShortcut"] as? Bool { globalShortcut = v }
+        if let v = d["showClaudeCode"] as? Bool { showClaudeCode = v }
+        if let v = d["awakeWhileClaudeWorks"] as? Bool { awakeWhileClaudeWorks = v }
+        if let v = d["lidOnlyOnPower"] as? Bool { lidOnlyOnPower = v }
+        if let v = d["lidBatteryFloor"] as? Int { lidBatteryFloor = min(80, max(5, v)) }
+        if let v = d["lidMaxHours"] as? Int { lidMaxHours = min(24, max(1, v)) }
+    }
+
     /// "80, 95" -> [80, 95]; invalid entries dropped, clamped to 1…100.
     var thresholds: [Double] {
         thresholdsText.split(whereSeparator: { $0 == "," || $0 == " " })
@@ -124,8 +155,11 @@ enum Keychain {
 }
 
 enum AppPaths {
+    /// Set by demo mode so it never reads or writes the real data folder.
+    nonisolated(unsafe) static var supportOverride: URL?
+
     static var support: URL {
-        let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let u = supportOverride ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ClaudeUsageBar", isDirectory: true)
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
@@ -171,6 +205,7 @@ enum Fmt {
     }
 
     static func relative(_ date: Date, now: Date) -> String {
+        if abs(date.timeIntervalSince(now)) < 10 { return "just now" }
         let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated
         return f.localizedString(for: date, relativeTo: now)
     }

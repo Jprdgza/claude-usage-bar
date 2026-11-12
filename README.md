@@ -16,9 +16,39 @@ this standalone app. It never touches `/Applications/Claude.app`.
 Background research on the extension (endpoints, response shapes, token and caching math) is in
 [RESEARCH.md](RESEARCH.md).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/popover-dark.png">
+  <img src="docs/screenshots/popover.png" alt="Menu-bar popover: limits with pace, a decreased-limits warning, a queued Claude Code message and Claude Code usage by project" width="380">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/efficiency-detail-dark.png">
+  <img src="docs/screenshots/efficiency-detail.png" alt="Efficiency chart: work per 1% of the 5-hour limit per window, with a clicked window flagged as decreased limits" width="560">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png">
+  <img src="docs/screenshots/history.png" alt="Usage history: 5-hour and weekly limits over a week, with peak hours shaded" width="560">
+</picture>
+
+<sub>Screenshots use made-up demo data (`macos/scripts/screenshots.sh`).</sub>
+
 ---
 
 ## Install
+
+### Download
+
+1. Get `ClaudeUsage-<version>.zip` from the [latest release](../../releases/latest) (Apple Silicon and Intel, macOS 14+).
+2. Unzip it and move **ClaudeUsageBar.app** to Applications.
+3. **First launch:** the app isn't notarized (that needs a paid Apple developer account), so macOS
+   blocks it the first time. Open it once, then go to **System Settings → Privacy & Security**, scroll
+   down to "ClaudeUsageBar was blocked", and click **Open Anyway**. Or in Terminal:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/ClaudeUsageBar.app
+   ```
+   Either way, only do this for a copy you downloaded from this repository's releases.
+
+### Build from source
 
 Requires macOS 14+ and Xcode (or the Swift 6 toolchain).
 
@@ -132,6 +162,14 @@ sleep only while Claude Code is working, and turns it back on when Claude Code i
 quits or restarts, below a battery floor (default 25 %), or after a maximum time (default 8 hours).
 Don't run a closed laptop in a bag. **Remove setup…** deletes the rule.
 
+**Backup** (Settings → Backup): once a day, the app copies its own data (usage history, efficiency,
+settings, optionally the message queue) into a folder you choose. Google Drive, Dropbox, OneDrive,
+Box and iCloud Drive show up automatically when their Mac app is installed; their app uploads the
+backup, so this app never connects to them or asks for an account. Any other folder works too. It
+keeps the last 14 days, never includes your claude.ai login or API key, and **Restore…** merges a
+backup into what's on this Mac (restored queued messages are never re-sent). The first backup into a
+cloud folder may make macOS ask whether the app can access that provider's files.
+
 **Global shortcut:** ⌥⌘U opens the popover from anywhere (Settings → Menu bar to turn off).
 
 **Can't see the menu-bar icon?** (It can hide behind the notch.) Open the app again from Finder or Spotlight
@@ -204,6 +242,9 @@ Anything approximate is marked with `*` or "approx", and the reason is in the to
   shows it while a message is queued; it's released as soon as nothing is waiting.
 - **Claude Code logs** are read in place, on this Mac. Only token counts, model names, times and
   project folder paths are kept in memory.
+- **Backups** contain only the app's own data files and settings, never Keychain items. If you back
+  up into a cloud folder, that provider stores your usage history (and queued message text, if
+  included). Turn off "Include queued messages" if you don't want that.
 - **The global shortcut** uses `RegisterEventHotKey`, which receives only ⌥⌘U, not other keystrokes,
   and needs no Accessibility permission.
 - **The debug log** (in-app, and `~/Library/Application Support/ClaudeUsageBar/debug.log`) contains
@@ -249,7 +290,8 @@ macos/
   Sources/UsageCore/      config, JSON, usage decoding + pace, account/tier, token + caching analysis, network
   Sources/ClaudeUsageBar/ SwiftUI app: login, Keychain, polling, notifications, popover, settings
   Tests/UsageCoreTests/   decoding + token-breakdown tests, with JSON fixtures
-  scripts/bundle.sh       build + sign the .app
+  scripts/bundle.sh       build + sign the .app (--universal --zip for releases)
+  scripts/screenshots.sh  regenerate the README screenshots from demo data
 ```
 
 ## License
