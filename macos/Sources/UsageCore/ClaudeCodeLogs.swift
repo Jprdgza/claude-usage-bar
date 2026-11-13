@@ -29,7 +29,12 @@ public struct CodeUsageEntry: Sendable, Equatable {
     public static func parse(line: Substring) -> CodeUsageEntry? {
         // Cheap pre-filter: most lines are user/tool/progress lines.
         guard line.contains("\"usage\""), line.contains("\"assistant\"") else { return nil }
-        guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+        return parse(json: Data(line.utf8))
+    }
+
+    /// Parses one already pre-filtered log line.
+    static func parse(json data: Data) -> CodeUsageEntry? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               obj["type"] as? String == "assistant",
               let msg = obj["message"] as? [String: Any],
               let usage = msg["usage"] as? [String: Any],
@@ -147,13 +152,49 @@ public final class CodeLogScanner: @unchecked Sendable {
             defer { try? h.close() }
             try? h.seek(toOffset: start)
             guard let data = try? h.readToEnd(), let lastNewline = data.lastIndex(of: 0x0A) else { continue }
-            let complete = data[data.startIndex...lastNewline]  // a half-written last line waits for the next scan
-            for line in String(decoding: complete, as: UTF8.self).split(separator: "\n") {
-                if let e = CodeUsageEntry.parse(line: line), e.time >= cutoff { ledger.add(e) }
-            }
-            offsets[path] = start + UInt64(complete.count)
+            // A half-written last line waits for the next scan. Logs run to hundreds of MB (tool output),
+            // so lines are found and pre-filtered as raw bytes; only candidates are decoded as JSON.
+            let completeCount = lastNewline - data.startIndex + 1
+            for e in Self.entries(in: data.prefix(completeCount)) where e.time >= cutoff { ledger.add(e) }
+            offsets[path] = start + UInt64(completeCount)
         }
         ledger.prune(before: cutoff)
+    }
+
+    private static let usageKey = Array("\"usage\"".utf8), assistantKey = Array("\"type\":\"assistant\"".utf8)
+
+    private static let messageIdKey = Array("\"id\":\"msg_".utf8)
+
+    /// Usage entries in a block of complete log lines. Claude Code writes a message once per content
+    /// block while streaming, with usage that only grows, so only the last line per message id is
+    /// decoded (several times fewer JSON decodes on real logs, same totals).
+    static func entries(in data: Data) -> [CodeUsageEntry] {
+        var lastLine: [Data: Range<Int>] = [:], order: [Data] = [], noId: [Range<Int>] = []
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            guard let base = raw.baseAddress else { return }
+            func find(_ key: [UInt8], _ from: Int, _ len: Int) -> Int? {
+                key.withUnsafeBufferPointer { k in memmem(base + from, len, k.baseAddress, k.count).map { UnsafeRawPointer($0) - base } }
+            }
+            var pos = 0
+            let end = raw.count
+            while pos < end {
+                let lineEnd = memchr(base + pos, 0x0A, end - pos).map { UnsafeRawPointer($0) - base } ?? end
+                let len = lineEnd - pos
+                if len > 0, find(usageKey, pos, len) != nil, find(assistantKey, pos, len) != nil {
+                    if let idAt = find(messageIdKey, pos, len),
+                       let close = memchr(base + idAt + messageIdKey.count, 0x22, lineEnd - idAt - messageIdKey.count) {
+                        let id = Data(bytes: base + idAt, count: UnsafeRawPointer(close) - base - idAt)
+                        if lastLine[id] == nil { order.append(id) }
+                        lastLine[id] = pos..<lineEnd
+                    } else {
+                        noId.append(pos..<lineEnd)
+                    }
+                }
+                pos = lineEnd + 1
+            }
+        }
+        let ranges = order.compactMap { lastLine[$0] } + noId
+        return ranges.compactMap { r in CodeUsageEntry.parse(json: data[data.startIndex + r.lowerBound ..< data.startIndex + r.upperBound]) }
     }
 
     public func projects(since: Date, config: AppConfig) -> [CodeProjectUsage] {
@@ -173,6 +214,8 @@ public struct CodeSession: Identifiable, Sendable, Equatable, Hashable {
     public var id: String          // session id = log file name; `claude --resume <id>`
     public var title: String
     public var lastActive: Date
+    /// The permission mode the chat was last used with ("auto", "acceptEdits", …), if recorded.
+    public var permissionMode: String? = nil
 }
 
 public struct CodeProject: Identifiable, Sendable, Equatable, Hashable {
@@ -198,7 +241,8 @@ public enum CodeSessionCatalog {
                       now.timeIntervalSince(mtime) < days * 86400,
                       let info = tailInfo(f) , let cwd = info.cwd else { continue }
                 let id = f.deletingPathExtension().lastPathComponent
-                byPath[cwd, default: []].append(CodeSession(id: id, title: info.title ?? "Session \(id.prefix(8))", lastActive: mtime))
+                byPath[cwd, default: []].append(CodeSession(id: id, title: info.title ?? "Session \(id.prefix(8))", lastActive: mtime,
+                                                            permissionMode: info.permissionMode))
             }
         }
         return byPath.compactMap { path, sessions in
@@ -211,7 +255,7 @@ public enum CodeSessionCatalog {
     }
 
     /// Last custom title (or last prompt) and the working directory, from the final ~256 KB.
-    static func tailInfo(_ url: URL) -> (title: String?, cwd: String?)? {
+    static func tailInfo(_ url: URL) -> (title: String?, cwd: String?, permissionMode: String?)? {
         guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? h.close() }
         let size = (try? h.seekToEnd()) ?? 0
@@ -220,9 +264,14 @@ public enum CodeSessionCatalog {
         return parseTail(String(decoding: data, as: UTF8.self))
     }
 
-    public static func parseTail(_ text: String) -> (title: String?, cwd: String?) {
-        var title: String?, prompt: String?, cwd: String?
+    public static func parseTail(_ text: String) -> (title: String?, cwd: String?, permissionMode: String?) {
+        var title: String?, prompt: String?, cwd: String?, mode: String?
         for line in text.split(separator: "\n").reversed() {
+            // Each user message records the mode it was sent with: "permissionMode":"auto".
+            if mode == nil, let r = line.range(of: "\"permissionMode\":\"") {
+                let rest = line[r.upperBound...]
+                if let end = rest.firstIndex(of: "\""), case let m = String(rest[..<end]), CodeCommand.permissionModes.contains(m) { mode = m }
+            }
             if title == nil, line.contains("\"custom-title\""),
                let o = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], let t = o["customTitle"] as? String, !t.isEmpty { title = t }
             if prompt == nil, line.contains("\"last-prompt\""),
@@ -231,9 +280,9 @@ public enum CodeSessionCatalog {
             }
             if cwd == nil, line.contains("\"cwd\""),
                let o = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], let c = o["cwd"] as? String { cwd = c }
-            if title != nil, cwd != nil { break }
+            if title != nil, cwd != nil, mode != nil { break }
         }
-        return (title ?? prompt, cwd)
+        return (title ?? prompt, cwd, mode)
     }
 }
 

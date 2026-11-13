@@ -166,13 +166,21 @@ public enum EfficiencyAnalyzer {
         }
     }
 
-    /// "Mon–Fri 06:00–12:00" in the Mac's time zone.
-    public static func peakHoursLocal(_ config: AppConfig, timeZone: TimeZone = .current) -> String {
-        let offset = Double(timeZone.secondsFromGMT()) / 3600
+    /// Peak hours on the user's own clock: "Mon–Fri 6 AM–12 PM" (or "06:00–12:00" with a 24-hour
+    /// clock), in the Mac's time zone and clock format. Uses today's offset, so daylight saving is right.
+    public static func peakHoursLocal(_ config: AppConfig, timeZone: TimeZone = .current, locale: Locale = .current,
+                                      now: Date = Date()) -> String {
+        var utc = Calendar(identifier: .gregorian); utc.timeZone = TimeZone(identifier: "UTC")!
+        let day = utc.startOfDay(for: now)
+        let f = DateFormatter(); f.locale = locale; f.timeZone = timeZone
+        f.setLocalizedDateFormatFromTemplate("j")   // "6 AM" or "06"
+        let g = DateFormatter(); g.locale = locale; g.timeZone = timeZone
+        g.setLocalizedDateFormatFromTemplate("jmm") // "6:30 AM" or "06:30"
+        let twentyFour = f.dateFormat.contains("H")
         func local(_ h: Int) -> String {
-            let x = (Double(h) + offset).truncatingRemainder(dividingBy: 24)
-            let v = x < 0 ? x + 24 : x
-            return String(format: "%02d:%02d", Int(v), Int((v - floor(v)) * 60))
+            let d = day.addingTimeInterval(Double(h) * 3600)
+            let minutes = Calendar(identifier: .gregorian).dateComponents(in: timeZone, from: d).minute ?? 0
+            return (twentyFour || minutes != 0 ? g : f).string(from: d)   // "6 AM", "5:30 AM", "06:00"
         }
         let days = config.peakHours.weekdaysOnly ? "Mon–Fri " : ""
         return days + local(config.peakHours.startHourUTC) + "–" + local(config.peakHours.endHourUTC)

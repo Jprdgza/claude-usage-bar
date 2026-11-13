@@ -93,11 +93,36 @@ final class CodeLiveTests: XCTestCase {
                                                messageFile: "/m", pidFile: "/p", title: "t")
         XCTAssertTrue(fresh.contains("'--session-id' 'new-id'"))
         XCTAssertEqual(CodeCommand.streamArguments(target: t, session: .resume("d6a7")), ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--resume", "d6a7"])
-        let fork = CodeCommand.SessionMode.fork(from: "d6a7", to: "f00d", name: "Website (scheduled)")
-        XCTAssertEqual(fork.id, "f00d")
-        XCTAssertEqual(fork.arguments, ["--resume", "d6a7", "--fork-session", "--session-id", "f00d", "--name", "Website (scheduled)"])
-        let forkScript = CodeCommand.terminalScript(claude: "/c", target: t, session: fork, messageFile: "/m", pidFile: "/p", title: "t")
-        XCTAssertTrue(forkScript.contains("'--fork-session' '--session-id' 'f00d' '--name' 'Website (scheduled)' -- \"$prompt\""))
+    }
+
+    func testScannerKeepsLastLinePerMessage() {
+        // Streaming writes one line per content block; usage only grows. Plus noise lines.
+        let lines = [
+            #"{"type":"user","message":{"content":"mentions "usage" and "type":"assistant" in text"},"timestamp":"2026-11-12T10:00:00Z"}"#,
+            #"{"type":"assistant","cwd":"/p","sessionId":"s","timestamp":"2026-11-12T10:00:01Z","message":{"id":"msg_A","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":1,"cache_read_input_tokens":100}}}"#,
+            #"{"type":"assistant","cwd":"/p","sessionId":"s","timestamp":"2026-11-12T10:00:02Z","message":{"id":"msg_A","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":40,"cache_read_input_tokens":100}}}"#,
+            #"{"type":"assistant","cwd":"/p","sessionId":"s","timestamp":"2026-11-12T10:00:03Z","message":{"id":"msg_B","model":"claude-opus-5-5","usage":{"input_tokens":2,"output_tokens":7}}}"#,
+            #"{"type":"assistant","cwd":"/p","timestamp":"2026-11-12T10:00:04Z","message":{"id":"msg_C","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}"#,
+        ]
+        let entries = CodeLogScanner.entries(in: Data((lines.joined(separator: "\n") + "\n").utf8))
+        XCTAssertEqual(entries.map(\.id), ["msg_A", "msg_B"], "one entry per message; synthetic and user lines skipped")
+        XCTAssertEqual(entries.first?.output, 40, "the last (complete) usage is kept")
+        XCTAssertTrue(CodeLogScanner.entries(in: Data()).isEmpty)
+    }
+
+    func testPermissionModeFromChat() {
+        let tail = """
+        {"type":"user","permissionMode":"auto","cwd":"/p","message":{"content":"x"}}
+        {"type":"assistant","message":{"content":[]}}
+        """
+        XCTAssertEqual(CodeSessionCatalog.parseTail(tail).permissionMode, "auto")
+        XCTAssertNil(CodeSessionCatalog.parseTail(#"{"type":"user","permissionMode":"weird"}"#).permissionMode, "unknown modes are ignored")
+        let chat = CodeSession(id: "a", title: "A", lastActive: Date(), permissionMode: "auto")
+        let other = CodeSession(id: "b", title: "B", lastActive: Date(), permissionMode: "dontAsk")
+        let project = CodeProject(path: "/p", name: "p", sessions: [other, chat], lastActive: Date())
+        XCTAssertEqual(CodeCommand.permissionMode(for: chat, in: project), "auto", "the chat's own mode")
+        XCTAssertEqual(CodeCommand.permissionMode(for: nil, in: project), "dontAsk", "new chat: the project's latest chat's mode")
+        XCTAssertEqual(CodeCommand.permissionMode(for: nil, in: nil), "acceptEdits")
     }
 
     func testDesktopHoldsSession() {

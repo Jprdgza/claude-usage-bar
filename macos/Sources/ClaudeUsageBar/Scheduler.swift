@@ -178,33 +178,25 @@ import UsageCore
         let display = model.settings.codeRunDisplay
         let inTerminal = display == "terminal"
         await stopTerminalRun(id)   // a Terminal window left from an earlier try of this job
-        // Resume only a session that really exists; a new one gets an ID up front so retries continue it.
-        // If the Claude app has the session open, writing to it would be invisible there and could
-        // split the conversation, so the run goes into a copy (fork) that the app can open afterwards.
+        // Always the chat you picked (resume only one that really exists; a new one gets an ID up front
+        // so retries continue it). If the Claude app has it open, the app keeps showing what it loaded
+        // until it's restarted, so the result says that.
         let exists = target.sessionId.map { SessionTurn.logFile(sessionId: $0) != nil } ?? false
-        let session: CodeCommand.SessionMode
-        if exists, let sid = target.sessionId {
-            session = await Self.desktopHolds(sid)
-                ? .fork(from: sid, to: UUID().uuidString.lowercased(),
-                        name: "\((target.sessionTitle ?? target.projectName).replacingOccurrences(of: " (scheduled)", with: "")) (scheduled)")
-                : .resume(sid)
-        } else {
-            session = .new(target.sessionId ?? UUID().uuidString.lowercased())
-        }
+        let session: CodeCommand.SessionMode = exists ? .resume(target.sessionId!) : .new(target.sessionId ?? UUID().uuidString.lowercased())
         let sessionId = session.id
+        let openInApp = exists ? await Self.desktopHolds(sessionId) : false
         let continuing = exists && j.continueOnRetry == true
         let prompt = continuing ? CodeCommand.continuePrompt : j.text
         live[id] = [CodeLiveLine(.info, continuing ? "Limit reset: asking Claude Code to continue" : "Sending your message")]
-        if case .fork(_, _, let name) = session {
-            live[id, default: []].append(CodeLiveLine(.info, "The session is open in the Claude app, so this runs in a copy: \(name)"))
+        if openInApp {
+            live[id, default: []].append(CodeLiveLine(.info, "This chat is open in the Claude app: press ⌘R there (View → Reload) to see the new messages"))
         }
         update(id) {
             $0.state = .waitingForReply; $0.sentAt = Date(); $0.code?.sessionId = sessionId
-            if case .fork(_, _, let name) = session { $0.code?.sessionTitle = name; $0.conversationName = "\(target.projectName) · \(name)" }
             $0.detail = inTerminal ? "Running in a Terminal window (\(target.projectName))…" : "Running in Claude Code (\(target.projectName))…"
         }
         let how: String
-        switch session { case .resume: how = "resuming a session"; case .new: how = "new session"; case .fork: how = "in a copy of the session, which is open in the Claude app" }
+        switch session { case .new: how = "new session"; default: how = openInApp ? "resuming a session that's open in the Claude app" : "resuming a session" }
         log.add("Scheduled message: running Claude Code in \(target.projectName) (\(how))\(inTerminal ? " in Terminal" : "")")
 
         let timeout: TimeInterval = 4 * 3600
@@ -228,10 +220,11 @@ import UsageCore
                 $0.detail = "Finished." + (r.permissionDenials > 0 ? " \(r.permissionDenials) action(s) needed permission and were skipped; open the session to approve them." : "")
             }
             log.add("Scheduled message: Claude Code finished in \(target.projectName)")
-            if display == "desktop" {
+            if await Self.desktopHolds(sessionId) {
+                update(id) { $0.detail = ($0.detail ?? "Finished.") + " " + Self.reopenHint }
+            } else if display == "desktop" {
                 let opened = await openSession(sessionId, in: target.projectPath)
-                update(id) { $0.detail = ($0.detail ?? "Finished.") + (opened ? " Opened in the Claude app."
-                    : " Couldn't open it in the Claude app (if it's already open there, click another session, then Open in Claude).") }
+                update(id) { $0.detail = ($0.detail ?? "Finished.") + (opened ? " Opened in the Claude app." : " Couldn't open it in the Claude app; use Open in Claude.") }
             }
             model.notifier.post(id: "sched-\(id)", title: "Claude Code finished in \(target.projectName)",
                                 body: preview.isEmpty ? "Your scheduled message was run." : preview)
@@ -408,6 +401,7 @@ import UsageCore
                     $0.state = .done; $0.finishedAt = Date(); $0.continueOnRetry = nil
                     $0.detail = "Finished. The Terminal window is still open if you want to keep going."
                 }
+                if await Self.desktopHolds(sessionId) { update(id) { $0.detail = ($0.detail ?? "") + " " + Self.reopenHint } }
                 log.add("Scheduled message: Claude Code finished in \(target.projectName) (Terminal)")
                 let preview = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(140))
                 model?.notifier.post(id: "sched-\(id)", title: "Claude Code finished in \(target.projectName)",
@@ -458,8 +452,7 @@ import UsageCore
     func openSession(_ sid: String, in folder: String) async -> Bool {
         guard let exe = await Self.findClaude() else { return false }
         if await Self.desktopHolds(sid) {
-            // It was opened there while the run was going: the app keeps showing its own older copy.
-            log.add("Session is already open in the Claude app, which doesn't show changes made elsewhere to an open session")
+            log.add("Session is already open in the Claude app; press ⌘R there (View → Reload) to see new messages")
             return false
         }
         let (status, out, err) = await Self.runProcess("/usr/bin/script", args: ["-q", "/dev/null", exe, "--desktop", "--resume", sid],
@@ -469,6 +462,8 @@ import UsageCore
         log.add(ok ? "Opened the session in the Claude app" : "Couldn't open the session in the Claude app: \(text.suffix(200))")
         return ok
     }
+
+    static let reopenHint = "The chat was open in the Claude app, which doesn't refresh it by itself: click the chat there and press ⌘R (View → Reload) to see the new messages. Don't type in that chat before you do."
 
     /// Whether the Claude desktop app currently has this session open.
     nonisolated static func desktopHolds(_ sid: String) async -> Bool {

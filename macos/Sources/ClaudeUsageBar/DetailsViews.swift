@@ -201,13 +201,12 @@ struct ScheduleTab: View {
     @State private var when = "session"
     @State private var at = Date().addingTimeInterval(3600)
     /// "code", or "chat" where sending into claude.ai chats is available.
-    @State private var destination = ScheduleTab.canSendToChats ? "chat" : "code"
+    @AppStorage("scheduleDestination") private var destination = "code"
 
     static let canSendToChats = false
     @State private var projects: [CodeProject] = []
     @State private var projectPath = ""
     @State private var sessionId = "__new__"
-    @State private var permissionMode = "dontAsk"
 
     private var project: CodeProject? { projects.first { $0.path == projectPath } }
 
@@ -217,10 +216,13 @@ struct ScheduleTab: View {
             Divider()
             queue
         }
-        .task { if Self.canSendToChats { await loadChats() }; await loadProjects() }
+        .task {
+            if !Self.canSendToChats { destination = "code" }
+            if !resettable.contains(where: { $0.id == when }) { when = resettable.first?.id ?? "time" }
+            if Self.canSendToChats { await loadChats() }
+            await loadProjects()
+        }
     }
-
-    private var resettable: [UsageWindow] { (model.usage?.windows ?? []).filter { $0.resetsAt != nil } }
 
     @ViewBuilder private var composer: some View {
         HStack {
@@ -231,9 +233,7 @@ struct ScheduleTab: View {
                     Text("claude.ai chat").tag("chat")
                     Text("Claude Code").tag("code")
                 }
-                .pickerStyle(.segmented).frame(width: 260)
-            } else {
-                Text("Sends into Claude Code").font(.caption).foregroundStyle(.secondary)
+                .pickerStyle(.segmented).frame(width: 240)
             }
         }
         if destination == "chat" {
@@ -251,31 +251,74 @@ struct ScheduleTab: View {
         }
         TextEditor(text: $text)
             .font(.body).frame(height: 90)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
+            .scrollContentBackground(.hidden).padding(4)
+            .background(.background, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             .overlay(alignment: .topLeading) {
-                if text.isEmpty { Text("Message to send…").foregroundStyle(.tertiary).padding(6).allowsHitTesting(false) }
+                if text.isEmpty { Text("Message to send…").foregroundStyle(.tertiary).padding(.horizontal, 9).padding(.vertical, 4).allowsHitTesting(false) }
             }
-        Picker("Send", selection: $when) {
-            ForEach(resettable) { w in
-                Text("After the \(w.label) limit resets (\(Fmt.clock(w.resetsAt!.addingTimeInterval(model.config.schedule.delayAfterResetSeconds))))").tag(w.id)
-            }
-            Text("At a specific time").tag("time")
-        }
-        .pickerStyle(.radioGroup)
-        if when == "time" || !resettable.contains(where: { $0.id == when }) {
-            DatePicker("Time", selection: $at, in: Date()..., displayedComponents: [.date, .hourAndMinute]).frame(maxWidth: 300)
-        }
-        HStack {
-            Toggle("Keep the Mac awake until it's sent and answered", isOn: $settings.keepAwakeForScheduled)
-                .onChange(of: settings.keepAwakeForScheduled) { _, _ in scheduler.settingsChanged() }
+        whenPicker
+        HStack(alignment: .firstTextBaseline) {
+            Text(sendSummary).font(.callout).foregroundStyle(.secondary)
             Spacer()
             Button("Schedule") { schedule() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                           (destination == "chat" ? model.status == .loggedOut : project == nil))
         }
-        Text("The display can still turn off. Keep the Mac plugged in with the lid open: closing the lid on battery sleeps it anyway, and the message is then sent when it wakes. After the reply finishes, the Mac goes back to sleeping on its normal schedule.")
-            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if destination == "code" {
+            Label("When it's done, click the chat in the Claude app and press ⌘R to see it. Don't type in that chat while the scheduled message is running.",
+                  systemImage: "info.circle")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        Text("The Mac stays awake until it's sent and finished (the screen can still turn off). To close the lid, turn on \"Keep running with the lid closed\" in Settings.")
+            .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The 5-hour and weekly limits only (model-specific weekly limits reset with the weekly one anyway).
+    private var resettable: [UsageWindow] {
+        (model.usage?.windows ?? []).filter { ($0.id == "session" || $0.id == "weekly_all") && $0.resetsAt != nil }
+    }
+
+    private func resetLabel(_ w: UsageWindow) -> String { w.id == "session" ? "5-hour reset" : "Weekly reset" }
+
+    @ViewBuilder private var whenPicker: some View {
+        Picker("Send", selection: $when) {
+            ForEach(resettable) { w in Text(resetLabel(w)).tag(w.id) }
+            Text("At a time").tag("time")
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 360)
+        if when == "time" {
+            HStack(spacing: 8) {
+                DatePicker("", selection: $at, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    .labelsHidden().datePickerStyle(.field)
+                ForEach(presets, id: \.0) { p in
+                    Button(p.0) { at = p.1 }.buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+        }
+    }
+
+    /// Quick picks: in an hour, tonight, tomorrow morning.
+    private var presets: [(String, Date)] {
+        let cal = Calendar.current, now = Date()
+        var out: [(String, Date)] = [("In 1 hour", now.addingTimeInterval(3600))]
+        if let tonight = cal.date(bySettingHour: 23, minute: 0, second: 0, of: now), tonight > now.addingTimeInterval(1800) {
+            out.append(("Tonight \(Fmt.time(tonight))", tonight))
+        }
+        if let tomorrow = cal.date(byAdding: .day, value: 1, to: now), let morning = cal.date(bySettingHour: 8, minute: 0, second: 0, of: tomorrow) {
+            out.append(("Tomorrow \(Fmt.time(morning))", morning))
+        }
+        return out
+    }
+
+    private var sendSummary: String {
+        if let w = resettable.first(where: { $0.id == when }), let r = w.resetsAt {
+            let t = r.addingTimeInterval(model.config.schedule.delayAfterResetSeconds)
+            return "Sends \(Fmt.dayAndClock(t)), right after the \(w.id == "session" ? "5-hour" : "weekly") limit resets"
+        }
+        return "Sends \(Fmt.dayAndClock(at))"
     }
 
     @ViewBuilder private var queue: some View {
@@ -294,19 +337,7 @@ struct ScheduleTab: View {
         }
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                let chatJobs = scheduler.jobs.filter { !$0.isClaudeCode }.reversed()
-                let codeJobs = scheduler.jobs.filter(\.isClaudeCode).reversed()
-                if !chatJobs.isEmpty {
-                    Text("claude.ai chats").font(.subheadline.bold()).foregroundStyle(.secondary)
-                    ForEach(Array(chatJobs)) { j in JobRow(job: j) }
-                }
-                if !codeJobs.isEmpty {
-                    Text("Claude Code").font(.subheadline.bold()).foregroundStyle(.secondary)
-                    ForEach(Dictionary(grouping: Array(codeJobs), by: { $0.code?.projectName ?? "?" }).sorted { $0.key < $1.key }, id: \.key) { name, list in
-                        Text(name).font(.caption.bold()).padding(.leading, 4)
-                        ForEach(list) { j in JobRow(job: j) }
-                    }
-                }
+                ForEach(scheduler.jobs.reversed()) { j in JobRow(job: j) }   // newest first
             }
         }
     }
@@ -320,46 +351,30 @@ struct ScheduleTab: View {
                 ForEach(projects) { p in Text(p.name).tag(p.path) }
             }
             .frame(maxWidth: 420)
-            .onChange(of: projectPath) { _, _ in sessionId = "__new__" }
+            .onChange(of: projectPath) { _, _ in sessionId = project?.sessions.first?.id ?? "__new__" }
             .help(projectPath)
-            Picker("Session", selection: $sessionId) {
-                Text("New session in this project").tag("__new__")
+            Picker("Chat", selection: $sessionId) {
                 ForEach(project?.sessions ?? []) { s in Text("\(s.title) · \(Fmt.relative(s.lastActive, now: Date()))").tag(s.id) }
+                Text("New chat in this project").tag("__new__")
             }
             .frame(maxWidth: 420)
-            Picker("Permissions", selection: $permissionMode) {
-                Text("Only what's already allowed (safest)").tag("dontAsk")
-                Text("Also allow file edits").tag("acceptEdits")
-                Text("Auto mode (Claude Code decides what's safe)").tag("auto")
-            }
-            .frame(maxWidth: 420)
-            .help("In a Terminal window, anything needing approval waits there for you. In the app only, nobody is there to approve, so it's skipped (you'll see how many in the result).")
-            Picker("Show the run", selection: $settings.codeRunDisplay) {
-                Text("In the Claude app (opens there when it finishes)").tag("desktop")
-                Text("In a Terminal window (watch and type to Claude Code live)").tag("terminal")
-                Text("In this app only (Schedule → Watch)").tag("app")
-            }
-            .frame(maxWidth: 420)
-            .help("Claude app: runs in the background (follow it live with Watch), then opens the session in the Claude app. Terminal: runs in an interactive Claude Code window that stays open. App only: background, Watch only.")
-            if sessionId != "__new__" {
-                Label("The Claude app doesn't show changes made to a session it has open. If this session is open there when the message runs, it runs in a copy named \"… (scheduled)\" with the whole conversation, and that copy is what opens.",
-                      systemImage: "info.circle")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
+            .help("Permissions: the same mode as this chat (\(CodeCommand.permissionMode(for: selectedSession, in: project))).")
         }
     }
+
+    private var selectedSession: CodeSession? { project?.sessions.first { $0.id == sessionId } }
 
     private func loadProjects() async {
         let list = await Task.detached(priority: .userInitiated) { CodeSessionCatalog.list() }.value
         projects = list
         if project == nil { projectPath = list.first?.path ?? "" }
+        if sessionId == "__new__" || selectedSession == nil { sessionId = project?.sessions.first?.id ?? "__new__" }
     }
 
     private func loadChats() async {
         loadingChats = true
         chats = await model.recentConversations(limit: 30)
         loadingChats = false
-        if when == "session", !resettable.contains(where: { $0.id == "session" }) { when = resettable.first?.id ?? "time" }
     }
 
     private func schedule() {
@@ -373,7 +388,8 @@ struct ScheduleTab: View {
         if destination == "code", let p = project {
             let session = p.sessions.first { $0.id == sessionId }
             let target = ScheduledMessage.CodeTarget(projectPath: p.path, projectName: p.name, sessionId: session?.id,
-                                                     sessionTitle: session?.title, permissionMode: permissionMode)
+                                                     sessionTitle: session?.title,
+                                                     permissionMode: CodeCommand.permissionMode(for: session, in: p))
             scheduler.add(ScheduledMessage(conversationId: nil, conversationName: "\(p.name) · \(session?.title ?? "new session")",
                                            text: message, trigger: trigger, code: target))
         } else {
@@ -408,12 +424,13 @@ struct JobRow: View {
                     Button("Cancel") { scheduler.cancel(job.id) }
                 }
                 if job.state == .failed {
-                    Button(job.sentAt != nil ? "Send again (check the chat first: it may have gone through)" : "Retry now") { scheduler.sendNow(job.id) }
+                    Button(job.sentAt != nil ? "Send again" : "Retry now") { scheduler.sendNow(job.id) }
+                        .help(job.sentAt != nil ? "Check the chat first: part of it may already have gone through." : "")
                 }
                 if job.isClaudeCode, scheduler.live[job.id] != nil { Button(job.state.isActive ? "Watch" : "Show what happened") { watching = true } }
                 if job.isClaudeCode, job.code?.sessionId != nil, !job.state.isActive {
                     Button("Open in Claude") { scheduler.openInClaudeApp(job.id) }
-                        .help("Opens this session in the Claude desktop app so you can see everything it did.")
+                        .help("Opens this session in the Claude desktop app. If it's already open there, press ⌘R in the Claude app (View → Reload) to see the new messages.")
                 }
                 if !job.state.isActive { Button("Remove") { scheduler.remove(job.id) } }
             }

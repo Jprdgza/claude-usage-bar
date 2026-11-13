@@ -160,22 +160,27 @@ public enum SessionTurn: Equatable, Sendable {
 // MARK: Launching
 
 extension CodeCommand {
+    /// Modes `claude --permission-mode` accepts.
+    public static let permissionModes: Set<String> = ["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]
+
+    /// The mode a scheduled message runs with: the chat's own, else the project's most recent chat's,
+    /// else "acceptEdits" (a scheduled task usually needs to edit files, and nobody is there to approve).
+    public static func permissionMode(for session: CodeSession?, in project: CodeProject?) -> String {
+        session?.permissionMode ?? project?.sessions.lazy.compactMap(\.permissionMode).first ?? "acceptEdits"
+    }
+
     /// Which session a run writes to.
     public enum SessionMode: Equatable, Sendable {
         case resume(String)
         case new(String)
-        /// A copy of `from` with its whole history, under a new ID. Used when the session is open in
-        /// the Claude app, which doesn't show changes made to an open session from outside.
-        case fork(from: String, to: String, name: String)
 
         public var id: String {
-            switch self { case .resume(let s), .new(let s): return s; case .fork(_, let to, _): return to }
+            switch self { case .resume(let s), .new(let s): return s }
         }
         public var arguments: [String] {
             switch self {
             case .resume(let s): return ["--resume", s]
             case .new(let s): return ["--session-id", s]
-            case .fork(let from, let to, let name): return ["--resume", from, "--fork-session", "--session-id", to, "--name", name]
             }
         }
     }

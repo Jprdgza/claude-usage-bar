@@ -132,21 +132,21 @@ windows over 60 days). A window where the same work used noticeably more of the 
 normal) is flagged **"Decreased limits?"**, in red on the chart, in the History chart as a red band,
 and in the popover while it's happening. Click a bar (or a point in the History chart) for the
 details: tokens, how much of the limit they cost, and whether it was during **peak hours**. Peak hours
-(weekdays 12:00–18:00 UTC, shown in your time, grey bands on both charts) have a tighter 5-hour limit
+(weekdays 12:00–18:00 UTC, shown on your own clock, grey bands on both charts) have a tighter 5-hour limit
 by design, so peak-hour windows are compared with other peak-hour windows when there are enough;
 otherwise the note says peak hours probably explain it. It needs about 4 measured windows before it
 knows your normal. Only Claude Code can be measured (the one product with local token logs); its part
 of each window comes from claude.ai's weekly product split. Kept about a year in `efficiency.jsonl`
 (usage history is now kept 400 days too).
 
-**Scheduled messages** (popover → Schedule…): queue a message for **Claude Code** to run when a limit
-resets (or at a time you pick). Pick the project, then a session in it (titles as Claude Code shows
-them) or a new session, and what it may do without approval (only already-allowed tools / also file
-edits / auto mode), and how to show the run:
+**Scheduled messages** (popover → Schedule): queue a message for **Claude Code** to run when the 5-hour
+or weekly limit resets, or at a time you pick. Pick the project and chat (your most recent chat there is
+preselected) or a new chat. It runs with the same permission mode that chat already uses. Where the run
+shows (Settings → Scheduled messages):
 - **In the Claude app** (default): it runs in the background (Schedule → **Watch** follows it live),
-  then opens the session in the Claude desktop app with everything it did. The Claude app doesn't
-  show changes made to a session it already has open, so if the session is open there at run time,
-  the message runs in a copy named "… (scheduled)" with the whole conversation, and that copy opens.
+  then opens the session in the Claude desktop app with everything it did. It always goes into the
+  chat you picked. The Claude app doesn't refresh a chat it already has open, so if it was open there,
+  press ⌘R in the Claude app (View → Reload) to see the new messages, and don't type in it before you do.
 - **In a Terminal window**: at the scheduled time a Terminal window opens running interactive
   Claude Code (`claude --resume <session>`) with your message, so you can watch it and keep talking to
   it afterwards. The app follows the session log to know when it's done.

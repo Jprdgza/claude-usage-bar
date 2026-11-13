@@ -105,6 +105,7 @@ struct DemoData {
 /// Renders the app's real SwiftUI views with DemoData to PNGs, light and dark.
 @MainActor enum ScreenshotRenderer {
     static func run(into dir: URL) {
+        if ProcessInfo.processInfo.environment["RENDER_LIVE"] == "1" { return runLive(into: dir) }
         // Never touch the real data folder or settings.
         AppPaths.supportOverride = FileManager.default.temporaryDirectory.appendingPathComponent("claude-usage-demo-\(UUID().uuidString)")
         UserDefaults.standard.removePersistentDomain(forName: "ClaudeUsageBar.demo")
@@ -128,10 +129,31 @@ struct DemoData {
             render(EfficiencyTab(selected: flagged?.resetsAt).padding(16), model: model, size: CGSize(width: 720, height: 640), dark: dark,
                    to: dir.appendingPathComponent("efficiency-detail\(suffix).png"))
             render(HistoryTab().padding(16), model: model, size: CGSize(width: 720, height: 480), dark: dark, to: dir.appendingPathComponent("history\(suffix).png"))
+            // Development check only (lists real local projects, so never part of the README set).
+            if ProcessInfo.processInfo.environment["RENDER_SCHEDULE_TAB"] == "1" {
+                render(ScheduleTab().padding(16), model: model, size: CGSize(width: 720, height: 640), dark: dark, to: dir.appendingPathComponent("schedule\(suffix).png"))
+            }
         }
         UserDefaults.standard.removePersistentDomain(forName: "ClaudeUsageBar.demo")
         try? FileManager.default.removeItem(at: AppPaths.support)
         print("Rendered screenshots to \(dir.path)")
+    }
+
+    /// Development check: the real popover and Schedule tab with live data (the real app must be quit
+    /// first; this uses its data folder). Output contains personal data: never for the README.
+    private static func runLive(into dir: URL) {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let model = AppModel()
+        let deadline = Date().addingTimeInterval(90)
+        while Date() < deadline, model.usage == nil || model.chats.isEmpty || model.codeWeek.isEmpty {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        }
+        for dark in [false, true] {
+            let suffix = dark ? "-dark" : ""
+            render(PopoverView(), model: model, size: CGSize(width: 360, height: 0), dark: dark, to: dir.appendingPathComponent("live-popover\(suffix).png"))
+            render(ScheduleTab().padding(16), model: model, size: CGSize(width: 720, height: 700), dark: dark, to: dir.appendingPathComponent("live-schedule\(suffix).png"))
+        }
+        print("Rendered live screens to \(dir.path)")
     }
 
     /// Hosts the view in a real (off-screen) window so native buttons and pickers draw too, lets

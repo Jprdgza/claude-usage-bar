@@ -77,14 +77,6 @@ public struct ScheduledMessage: Codable, Identifiable, Sendable, Equatable {
 }
 
 public enum CodeCommand {
-    /// Arguments for a headless Claude Code run. The message itself goes on stdin, so text starting
-    /// with "-" can't be read as an option and it doesn't show up in `ps`.
-    public static func arguments(target: ScheduledMessage.CodeTarget) -> [String] {
-        var a = ["-p", "--output-format", "json", "--permission-mode", target.permissionMode]
-        if let s = target.sessionId { a += ["--resume", s] }
-        return a
-    }
-
     /// Where the `claude` CLI usually lives (an app launched at login doesn't get the shell's PATH).
     public static func candidatePaths(home: String = NSHomeDirectory()) -> [String] {
         [home + "/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude", home + "/.claude/local/claude"]

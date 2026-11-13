@@ -95,7 +95,7 @@ enum Keychain {
 
     init(defaults: UserDefaults = .standard) {
         d = defaults
-        d.register(defaults: ["refreshSeconds": 60, "thresholds": "80, 95", "recentChats": 5, "showPercent": true,
+        d.register(defaults: ["refreshSeconds": 60, "thresholds": "80, 95", "recentChats": 3, "showPercent": true,
                               "thresholdNotifications": true, "notifyReset": true, "resetOnlyAfterWarning": true,
                               "checkDesktopUpdates": true, "keepAwakeForScheduled": true, "globalShortcut": true,
                               "showClaudeCode": true, "awakeWhileClaudeWorks": true, "lidClosedWhileClaudeWorks": false,
@@ -179,11 +179,16 @@ enum AppPaths {
     }
 }
 
-enum Fmt {
-    static func tokens(_ n: Int) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal
-        return f.string(from: NSNumber(value: n)) ?? "\(n)"
+@MainActor enum Fmt {
+    // Formatters are costly to create; these are reused (UI code runs on the main thread).
+    private static let number: NumberFormatter = { let f = NumberFormatter(); f.numberStyle = .decimal; return f }()
+    private static func template(_ t: String) -> DateFormatter {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate(t); return f   // follows the Mac's 12/24-hour setting
     }
+    private static let time = template("jmm"), dayTime = template("EEEjmm")
+    private static let relativeFormatter: RelativeDateTimeFormatter = { let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated; return f }()
+
+    static func tokens(_ n: Int) -> String { number.string(from: NSNumber(value: n)) ?? "\(n)" }
 
     static func compact(_ n: Int) -> String {
         if n >= 1_000_000 { return String(format: n % 1_000_000 == 0 ? "%.0fM" : "%.1fM", Double(n) / 1e6) }
@@ -204,16 +209,24 @@ enum Fmt {
         return h > 0 ? "\(h)h \(mm)m" : "\(mm)m"
     }
 
+    /// "3:30 PM" today, "Fri 3:30 PM" otherwise (or 24-hour, per the Mac's setting).
     static func clock(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm" : "EEE HH:mm"
-        return f.string(from: date)
+        (Calendar.current.isDateInToday(date) ? time : dayTime).string(from: date)
+    }
+
+    static func time(_ date: Date) -> String { time.string(from: date) }
+
+    /// "today at 11:00 PM", "tomorrow at 8:00 AM", "Fri 3:30 PM".
+    static func dayAndClock(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "today at " + time.string(from: date) }
+        if cal.isDateInTomorrow(date) { return "tomorrow at " + time.string(from: date) }
+        return dayTime.string(from: date)
     }
 
     static func relative(_ date: Date, now: Date) -> String {
         if abs(date.timeIntervalSince(now)) < 10 { return "just now" }
-        let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated
-        return f.localizedString(for: date, relativeTo: now)
+        return relativeFormatter.localizedString(for: date, relativeTo: now)
     }
 }
 

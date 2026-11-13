@@ -95,7 +95,14 @@ final class EfficiencyTests: XCTestCase {
 
     func testPeakHoursInLocalTime() {
         XCTAssertEqual(EfficiencyAnalyzer.peakHoursLocal(config, timeZone: TimeZone(identifier: "America/New_York")!).hasPrefix("Mon–Fri "), true)
-        XCTAssertEqual(EfficiencyAnalyzer.peakHoursLocal(config, timeZone: utc), "Mon–Fri 12:00–18:00")
+        XCTAssertEqual(EfficiencyAnalyzer.peakHoursLocal(config, timeZone: utc, locale: Locale(identifier: "en_GB")), "Mon–Fri 12:00–18:00")
+        // A 12-hour clock in another time zone: 12–18 UTC is 7 AM–1 PM in New York in winter.
+        let ny = TimeZone(identifier: "America/New_York")!, winter = JSON.parseISODate("2026-01-15T12:00:00Z")!
+        let us = EfficiencyAnalyzer.peakHoursLocal(config, timeZone: ny, locale: Locale(identifier: "en_US"), now: winter)
+        XCTAssertEqual(us.replacingOccurrences(of: "\u{202F}", with: " "), "Mon–Fri 7 AM–1 PM")
+        // Half-hour offsets keep their minutes (India is UTC+5:30).
+        let india = EfficiencyAnalyzer.peakHoursLocal(config, timeZone: TimeZone(identifier: "Asia/Kolkata")!, locale: Locale(identifier: "en_US"), now: winter)
+        XCTAssertEqual(india.replacingOccurrences(of: "\u{202F}", with: " "), "Mon–Fri 5:30 PM–11:30 PM")
         let iv = EfficiencyAnalyzer.peakIntervals(from: date("2026-10-31T00:00:00Z"), to: date("2026-11-03T00:00:00Z"), config: config)
         XCTAssertEqual(iv.count, 1, "Sat/Sun skipped, Monday counted")
         XCTAssertEqual(iv[0].0, date("2026-11-02T12:00:00Z"))
@@ -116,10 +123,9 @@ final class CodeTargetTests: XCTestCase {
 
     func testArgumentsAndSessionTail() {
         let t = ScheduledMessage.CodeTarget(projectPath: "/p", projectName: "p", sessionId: "s1", sessionTitle: "T", permissionMode: "acceptEdits")
-        XCTAssertEqual(CodeCommand.arguments(target: t),
-                       ["-p", "--output-format", "json", "--permission-mode", "acceptEdits", "--resume", "s1"])
-        var n = t; n.sessionId = nil
-        XCTAssertFalse(CodeCommand.arguments(target: n).contains("--resume"))
+        XCTAssertEqual(CodeCommand.streamArguments(target: t, session: .resume("s1")),
+                       ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits", "--resume", "s1"])
+        XCTAssertEqual(CodeCommand.streamArguments(target: t, session: .new("n1")).suffix(2), ["--session-id", "n1"])
         let tail = """
         {"type":"user","cwd":"/Users/x/Project","message":{"content":"hi"}}
         {"type":"custom-title","customTitle":"Refactor the parser","sessionId":"s"}

@@ -46,26 +46,23 @@ struct PopoverView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { tl in
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 header(now: tl.date)
-                Divider()
                 switch model.status {
                 case .loggedOut:
-                    notice("Not logged in.", action: "Log in…") { WindowManager.shared.showLogin(model: model) }
+                    notice("Not logged in.", action: "Log in") { WindowManager.shared.showLogin(model: model) }
                 case .sessionExpired:
-                    notice("claude.ai rejected the saved session (expired or logged out elsewhere).", action: "Log in again…") {
+                    notice("claude.ai rejected the saved session (expired or logged out elsewhere).", action: "Log in again") {
                         WindowManager.shared.showLogin(model: model)
                     }
                 default:
-                    paceHeadline(now: tl.date)
                     usageSection(now: tl.date)
-                    scheduledLine
-                    powerLine
+                    alerts(now: tl.date)
                     if settings.showClaudeCode, !model.codeSession.isEmpty || !model.codeWeek.isEmpty {
                         Divider()
                         claudeCodeSection
                     }
-                    if settings.recentChats > 0 {
+                    if settings.recentChats > 0, !model.chats.isEmpty || model.chatsNote != nil {
                         Divider()
                         chatsSection(now: tl.date)
                     }
@@ -76,25 +73,29 @@ struct PopoverView: View {
                 Divider()
                 footer
             }
-            .padding(12)
-            .frame(width: 380)
+            .padding(14)
+            .frame(width: 360)
         }
         .onAppear { model.popoverOpened() }
     }
 
     private func header(now: Date) -> some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("Claude usage").font(.headline)
             if let a = model.account {
-                Text(a.tier.displayName).font(.caption).padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(.quaternary, in: Capsule())
+                chip(a.tier.displayName, color: .secondary)
                     .help("Plan detected from claude.ai's account data\(a.orgName.map { " (\($0))" } ?? "").")
             }
+            if UsageMath.isPeak(now, config: model.config) {
+                chip("Peak", color: .orange)
+                    .help("Peak hours (\(EfficiencyAnalyzer.peakHoursLocal(model.config)), your time): the 5-hour limit is tighter, so the same work uses more of it. Based on community observation, not an official schedule.")
+            }
             Spacer()
-            if model.paused { Text("paused").font(.caption).foregroundStyle(.secondary).help("Polling pauses while the Mac sleeps or the screen is locked.") }
-            if let t = model.lastUpdated {
+            if model.paused {
+                Text("paused").font(.caption).foregroundStyle(.secondary).help("Updates pause while the Mac sleeps or the screen is locked.")
+            } else if let t = model.lastUpdated {
                 Text(Fmt.relative(t, now: now)).font(.caption).foregroundStyle(.secondary)
-                    .help("Last successful refresh: \(Fmt.clock(t)). Refreshes every \(settings.refreshSeconds)s at most.")
+                    .help("Last updated \(Fmt.clock(t)).")
             }
             Button { model.refreshNow() } label: {
                 Image(systemName: "arrow.clockwise").rotationEffect(.degrees(model.refreshing ? 180 : 0))
@@ -103,9 +104,15 @@ struct PopoverView: View {
         }
     }
 
+    private func chip(_ text: String, color: Color) -> some View {
+        Text(text).font(.caption2.weight(.medium)).foregroundStyle(color)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(color.opacity(0.15), in: Capsule())
+    }
+
     @ViewBuilder private func usageSection(now: Date) -> some View {
         if case .error(let e) = model.status {
-            Text("Last refresh failed: \(e)").font(.caption).foregroundStyle(.red).lineLimit(3)
+            Text("Couldn't update: \(e)").font(.caption).foregroundStyle(.red).lineLimit(3)
                 .help("Retrying with backoff (up to 15 minutes). Details are in Settings → Debug log.")
         }
         if let u = model.usage {
@@ -115,46 +122,69 @@ struct PopoverView: View {
                      : "Usage data unavailable: claude.ai answered, but with no limits this app recognizes. The endpoint may have changed; check the debug log.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            ForEach(u.windows) { w in WindowRow(window: w, tier: model.tier, config: model.config, now: now) }
-            if let x = u.extra { ExtraRow(extra: x) }
-            ForEach(u.breakdowns) { b in
-                let shown = b.rows.filter { $0.percent > 0 }
-                if !shown.isEmpty {
-                    (Text(b.label + ": ").foregroundStyle(.secondary) +
-                     Text(shown.map { "\($0.name) \(Fmt.percent($0.percent))" }.joined(separator: " · ")))
-                        .font(.caption)
-                        .help("Where this window's usage went, as reported by claude.ai. Products at 0% are hidden (\(b.rows.filter { $0.percent == 0 }.map(\.name).joined(separator: ", "))). The per-chat stats below only cover claude.ai chats, not Claude Code or Cowork.")
-                }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(u.windows) { w in WindowRow(window: w, tier: model.tier, config: model.config, now: now) }
+                if let x = u.extra { ExtraRow(extra: x) }
+            }
+            if let b = u.breakdowns.first, case let shown = b.rows.filter({ $0.percent > 0 }), !shown.isEmpty {
+                Text(shown.map { "\($0.name) \(Fmt.percent($0.percent))" }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help("\(b.label): where this window's usage went, as reported by claude.ai.")
             }
         } else if model.status == .loading {
             HStack { ProgressView().controlSize(.small); Text("Loading…").foregroundStyle(.secondary) }
         }
     }
 
-    @ViewBuilder private func chatsSection(now: Date) -> some View {
-        HStack {
-            Text("Recent chats").font(.subheadline.bold())
-            Spacer()
-            Text(model.hasAPIKey ? "counted via API" : "approx")
-                .font(.caption2).foregroundStyle(.secondary)
-                .help(model.hasAPIKey
-                      ? "Token counts come from Anthropic's /v1/messages/count_tokens using your API key."
-                      : "No API key set: counts use a local approximation of Claude's tokenizer. Add a key in Settings for exact counts.")
-        }
-        if let note = model.chatsNote { Text(note).font(.caption).foregroundStyle(.secondary) }
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(model.chats) { c in
-                    ChatRow(stats: c, now: now, sessionCap: UsageMath.sessionCap(tier: model.tier, now: now, config: model.config),
-                            usage: model.usage, tier: model.tier, config: model.config)
-                }
-                if !model.chats.isEmpty {
-                    Text("Never counted: " + ConversationAnalyzer.neverCounted.joined(separator: " "))
-                        .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-                }
+    /// Only things that need attention: running out, tighter limits, queued messages, keep-awake.
+    @ViewBuilder private func alerts(now: Date) -> some View {
+        let warnings: [(String, Color)] = (model.usage?.windows ?? []).filter { $0.id == "session" || $0.id == "weekly_all" }.compactMap { w in
+            guard let reset = w.resetsAt else { return nil }
+            let name = w.id == "session" ? "5-hour" : "weekly"
+            if w.percent >= 100 { return ("\(name.capitalized) limit reached. Resets \(Fmt.clock(reset)).", .red) }
+            if let hit = w.pace(now: now)?.hitsLimitAt, hit < reset {
+                return ("At this pace you'll hit the \(name) limit around \(Fmt.clock(hit)).", .orange)
             }
+            return nil
         }
-        .frame(maxHeight: 340)
+        let hasAny = !warnings.isEmpty || model.currentEfficiency?.1?.kind == .tighter || !scheduler.active.isEmpty
+            || PowerManager.shared.lidModeActive || (PowerManager.shared.claudeWorking && settings.awakeWhileClaudeWorks)
+        if hasAny {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(warnings, id: \.0) { l in
+                    Label(l.0, systemImage: "exclamationmark.circle").foregroundStyle(l.1)
+                        .help("Linear projection of your rate so far in this window.")
+                }
+                if let (s, v) = model.currentEfficiency, let v, v.kind == .tighter {
+                    Button { open("efficiency") } label: {
+                        Label("Limits look tighter than usual: about \(Int(((1 - v.ratio) * 100).rounded()))% less work per 1%\(s.mostlyPeak && !v.comparedWithPeak ? " (mostly peak hours)" : "").",
+                              systemImage: "chart.line.downtrend.xyaxis").foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .help(EfficiencyAnalyzer.explain(s, verdict: v, config: model.config))
+                }
+                if let next = scheduler.active.min(by: { ($0.fireAt ?? .distantFuture) < ($1.fireAt ?? .distantFuture) }) {
+                    Button { open("schedule") } label: {
+                        Label("\(scheduler.active.count == 1 ? "Scheduled" : "\(scheduler.active.count) scheduled"): \(next.conversationName), \(scheduler.describe(next))",
+                              systemImage: "clock").foregroundStyle(.blue).lineLimit(2)
+                    }
+                    .buttonStyle(.plain)
+                    .help(scheduler.keepingAwake ? "The Mac stays awake until it's sent." : "")
+                }
+                powerLine
+            }
+            .font(.caption).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var powerLine: some View {
+        if PowerManager.shared.lidModeActive {
+            Label(PowerManager.shared.claudeWorking ? "Claude Code is working: the Mac stays on, even with the lid closed"
+                                                    : "Message scheduled: the Mac stays on, even with the lid closed", systemImage: "laptopcomputer")
+                .foregroundStyle(.secondary)
+        } else if PowerManager.shared.claudeWorking, settings.awakeWhileClaudeWorks {
+            Label("Claude Code is working: the Mac won't idle-sleep", systemImage: "cup.and.saucer").foregroundStyle(.secondary)
+        }
     }
 
     private func notice(_ text: String, action: String, _ run: @escaping () -> Void) -> some View {
@@ -164,95 +194,60 @@ struct PopoverView: View {
         }
     }
 
-    /// "Safe to start a big task?" in one line: where the current rate lands before each reset.
-    @ViewBuilder private func paceHeadline(now: Date) -> some View {
-        let lines: [(String, Color)] = (model.usage?.windows ?? []).filter { $0.id == "session" || $0.id == "weekly_all" }.compactMap { w in
-            guard let p = w.pace(now: now), let reset = w.resetsAt else { return nil }
-            let name = w.id == "session" ? "5-hour" : "weekly"
-            if w.percent >= 100 { return ("\(name.capitalized) limit reached. Resets \(Fmt.clock(reset)).", .red) }
-            if let hit = p.hitsLimitAt, hit < reset {
-                return ("At this pace you'll hit the \(name) limit around \(Fmt.clock(hit)), \(Fmt.countdown(to: reset, now: hit)) before it resets.", .orange)
-            }
-            return ("At this pace you'll end the \(name) window around \(Fmt.percent(min(100, p.projectedPercent))). Room for a big task.", .green)
-        }
-        ForEach(lines, id: \.0) { l in
-            Label(l.0, systemImage: l.1 == .green ? "checkmark.circle" : "exclamationmark.circle")
-                .font(.caption).foregroundStyle(l.1).fixedSize(horizontal: false, vertical: true)
-                .help("Linear projection of your rate so far in this window. It assumes you keep going at the same rate.")
-        }
-        if UsageMath.isPeak(now, config: model.config) {
-            Label("Peak hours now (\(EfficiencyAnalyzer.peakHoursLocal(model.config))): the 5-hour limit is tighter, so the same work uses more of it.",
-                  systemImage: "sun.max").font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                .help("Peak hours as observed by the Claude Usage Extension's author: weekdays \(model.config.peakHours.startHourUTC):00–\(model.config.peakHours.endHourUTC):00 UTC, with roughly a 1.5× tighter 5-hour limit. Not officially published.")
-        }
-        if let (s, v) = model.currentEfficiency, let v, v.kind == .tighter {
-            Button { model.detailsTab = "efficiency"; WindowManager.shared.showDetails(model: model) } label: {
-                Label("Decreased limits? This window you're getting about \(Int(((1 - v.ratio) * 100).rounded()))% less work per 1% than your normal\(s.mostlyPeak && !v.comparedWithPeak ? " (mostly peak hours)" : "").",
-                      systemImage: "chart.line.downtrend.xyaxis")
-                    .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-            }
-            .buttonStyle(.plain)
-            .help(EfficiencyAnalyzer.explain(s, verdict: v, config: model.config))
-        }
-    }
-
-    @ViewBuilder private var powerLine: some View {
-        if PowerManager.shared.claudeWorking, settings.awakeWhileClaudeWorks || settings.lidClosedWhileClaudeWorks {
-            Label(PowerManager.shared.lidModeActive ? "Claude Code is working: Mac stays on, even with the lid closed"
-                                                    : "Claude Code is working: Mac won't idle-sleep",
-                  systemImage: PowerManager.shared.lidModeActive ? "laptopcomputer" : "cup.and.saucer")
-                .font(.caption).foregroundStyle(.secondary)
-        } else if PowerManager.shared.lidModeActive {
-            Label("Message scheduled: Mac stays on, even with the lid closed", systemImage: "laptopcomputer")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder private var scheduledLine: some View {
-        if let next = scheduler.active.min(by: { ($0.fireAt ?? .distantFuture) < ($1.fireAt ?? .distantFuture) }) {
-            Button { model.detailsTab = "schedule"; WindowManager.shared.showDetails(model: model) } label: {
-                Label("\(scheduler.active.count == 1 ? "Message" : "\(scheduler.active.count) messages") for \(next.conversationName): \(scheduler.describe(next))" +
-                      (scheduler.keepingAwake ? " · keeping Mac awake" : ""), systemImage: "clock")
-                    .font(.caption).foregroundStyle(.orange).lineLimit(2)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
     @ViewBuilder private var claudeCodeSection: some View {
-        HStack {
-            Text("Claude Code this 5-hour window").font(.subheadline.bold())
-            Spacer()
-            Button("Details…") { model.detailsTab = "code"; WindowManager.shared.showDetails(model: model) }
-                .buttonStyle(.borderless).font(.caption)
-        }
-        if model.codeSession.isEmpty {
-            Text("No Claude Code activity in this window.").font(.caption).foregroundStyle(.secondary)
-        }
-        ForEach(model.codeSession.prefix(3)) { p in
-            HStack {
-                Text(p.name).font(.caption).lineLimit(1).frame(width: 130, alignment: .leading).help(p.path)
-                UsageBar(percent: p.share, level: .low)
-                Text(Fmt.percent(p.share)).font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Claude Code · this 5-hour window").font(.subheadline.weight(.semibold))
+            if model.codeSession.isEmpty {
+                Text("No Claude Code activity in this window.").font(.caption).foregroundStyle(.secondary)
             }
-            .help("\(Fmt.tokens(p.tokens)) tokens in \(p.sessions) session(s). Share = this project's part of your Claude Code usage in this window, weighted by API price ratios.")
+            ForEach(model.codeSession.prefix(3)) { p in
+                HStack(spacing: 8) {
+                    Text(p.name).font(.caption).lineLimit(1).frame(width: 120, alignment: .leading)
+                    UsageBar(percent: p.share, level: .low)
+                    Text(Fmt.percent(p.share)).font(.caption).monospacedDigit().frame(width: 36, alignment: .trailing)
+                }
+                .help("\(p.path)\n\(Fmt.tokens(p.tokens)) tokens in \(p.sessions) session(s). Share of your Claude Code usage in this window, weighted by API price ratios.")
+            }
+            if !model.codeWeek.isEmpty {
+                Text("This week: " + model.codeWeek.prefix(3).map { "\($0.name) \(Fmt.percent($0.share))" }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
-        if !model.codeWeek.isEmpty {
-            Text("This week: " + model.codeWeek.prefix(3).map { "\($0.name) \(Fmt.percent($0.share))" }.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+    }
+
+    @ViewBuilder private func chatsSection(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Recent chats").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(model.hasAPIKey ? "exact" : "estimated").font(.caption2).foregroundStyle(.secondary)
+                    .help((model.hasAPIKey
+                          ? "Token counts come from Anthropic's count_tokens endpoint using your API key."
+                          : "Token counts are a local estimate. Add an API key in Settings for exact counts.")
+                          + "\nNever counted: " + ConversationAnalyzer.neverCounted.joined(separator: " "))
+            }
+            if let note = model.chatsNote { Text(note).font(.caption).foregroundStyle(.secondary) }
+            // No ScrollView: inside the menu-bar panel it has no height of its own and collapses to nothing.
+            ForEach(model.chats) { c in
+                ChatRow(stats: c, now: now, sessionCap: UsageMath.sessionCap(tier: model.tier, now: now, config: model.config),
+                        usage: model.usage, tier: model.tier, config: model.config)
+            }
         }
+    }
+
+    private func open(_ tab: String) {
+        model.detailsTab = tab
+        WindowManager.shared.showDetails(model: model)
     }
 
     private var footer: some View {
-        HStack {
-            Button("Settings…") { WindowManager.shared.showSettings(model: model) }
-            Button("History") { model.detailsTab = "history"; WindowManager.shared.showDetails(model: model) }
-            Button("Efficiency") { model.detailsTab = "efficiency"; WindowManager.shared.showDetails(model: model) }
-            Button("Schedule…") { model.detailsTab = "schedule"; WindowManager.shared.showDetails(model: model) }
-                .help("Queue a message to send to a chat after a limit resets.")
+        HStack(spacing: 12) {
+            Button("Settings") { WindowManager.shared.showSettings(model: model) }
+            Button("History") { open("history") }
+            Button("Efficiency") { open("efficiency") }
+            Button("Schedule") { open("schedule") }.help("Queue a message to send after a limit resets or at a set time.")
             Spacer()
-            Button("Open claude.ai") { NSWorkspace.shared.open(URL(string: model.config.baseURL)!) }
-                .help("Opens claude.ai in your default browser.")
+            Button("claude.ai") { NSWorkspace.shared.open(URL(string: model.config.baseURL)!) }.help("Open claude.ai in your browser.")
             Button("Quit") { NSApp.terminate(nil) }
         }
         .buttonStyle(.borderless)
@@ -300,20 +295,13 @@ struct WindowRow: View {
                 .help(percentHelp)
             HStack(spacing: 10) {
                 if window.resetsAt != nil {
-                    Label(Fmt.countdown(to: window.resetsAt, now: now), systemImage: "timer")
+                    Text(window.resetsAt! > now ? "resets in \(Fmt.countdown(to: window.resetsAt, now: now))" : "resetting…")
                         .help("Resets at \(window.resetsAt.map(Fmt.clock) ?? "–") (time left until this window starts over).")
                 }
-                if let p = pace {
-                    Text("Pace \(Fmt.percent(p.projectedPercent))")
+                if let p = pace, !window.exceeded {
+                    Text("on pace for \(Fmt.percent(p.projectedPercent))")
                         .foregroundStyle(UsageLevel.of(p.projectedPercent).color)
                         .help(paceHelp(p))
-                    if let hit = p.hitsLimitAt {
-                        Text("hits 100% ~\(Fmt.clock(hit))").foregroundStyle(.red)
-                            .help("At the current rate this window runs out before it resets.")
-                    }
-                } else if window.windowLength == nil {
-                    Text("no pace").foregroundStyle(.tertiary)
-                        .help("This window's length isn't known, so there's no projection.")
                 }
                 if window.exceeded { Text("limit reached").foregroundStyle(.red) }
             }
@@ -364,43 +352,41 @@ struct ChatRow: View {
     var body: some View {
         let cost = stats.weightedNextCost(now: now)
         let cached = stats.isCached(now: now)
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
                 Text(stats.name).font(.callout).lineLimit(1)
                 Spacer()
-                if let m = stats.modelVersion {
-                    Text(shortModel(m)).font(.caption2).foregroundStyle(.secondary)
-                        .help("Model this conversation uses (\(m)); costs are weighted ×\(String(format: "%g", stats.weight)) for it.")
-                }
-            }
-            HStack(spacing: 10) {
-                Text("\(Fmt.compact(stats.length))\(stats.lengthIsApprox ? "*" : "") tok")
-                    .foregroundStyle(lengthColor)
-                    .help(lengthHelp)
-                Text("next ≈ \(Fmt.compact(cost))")
+                Text("next ≈ \(Fmt.compact(cost))").font(.caption.monospacedDigit())
                     .foregroundStyle(cached ? .green : .primary)
                     .help(costHelp(cost: cost, cached: cached))
+            }
+            HStack(spacing: 6) {
+                Text("\(Fmt.compact(stats.length))\(stats.lengthIsApprox ? "*" : "") tok").foregroundStyle(lengthColor).help(lengthHelp)
                 if let cap = sessionCap, cap > 0 {
-                    Text("\(Fmt.percent(Double(cost) / cap * 100)) of 5h")
-                        .help("Estimated share of your 5-hour budget one more message here would use, against a guessed cap of ~\(Fmt.compact(Int(cap))) for the \(tier.displayName) plan. Treat it as a rough guide.")
+                    Text("· \(Fmt.percent(Double(cost) / cap * 100)) of 5h")
+                        .help("Estimated share of your 5-hour budget one more message here would use (guessed cap ~\(Fmt.compact(Int(cap))) for \(tier.displayName)).")
                 }
                 if cached, let until = stats.cachedUntil {
-                    Text("cached \(Fmt.countdown(to: until, now: now))").foregroundStyle(.green)
-                        .help("The conversation prefix is assumed to stay in claude.ai's prompt cache for an hour after the last reply. Follow-ups until then are much cheaper.")
+                    Text("· cached \(Fmt.countdown(to: until, now: now))").foregroundStyle(.green)
+                        .help("The conversation is assumed to stay in claude.ai's prompt cache for an hour after the last reply, so follow-ups are cheaper.")
                 }
+                Spacer()
+                if let m = stats.modelVersion { Text(shortModel(m)).help("Model: \(m) (costs weighted ×\(String(format: "%g", stats.weight))).") }
             }
-            .font(.caption.monospacedDigit())
-            if let left = usage.flatMap({ UsageMath.messagesLeft($0, tier: tier, messageCost: Double(cost), now: now, config: config) }) {
-                Text("≈ \(left.messages >= 1000 ? "1000+" : String(Int(left.messages))) more messages like this before \(windowName(left.windowId)) runs out")
-                    .font(.caption2).foregroundStyle(left.messages < 15 ? .red : .secondary)
-                    .help("Remaining estimated budget of the tightest limit, divided by this chat's next-message cost. Uses guessed caps, so it's an estimate.")
-            }
-            DisclosureGroup(isExpanded: $expanded) { breakdown } label: {
-                Text("Breakdown").font(.caption2).foregroundStyle(.secondary)
+            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if expanded {
+                if let left = usage.flatMap({ UsageMath.messagesLeft($0, tier: tier, messageCost: Double(cost), now: now, config: config) }) {
+                    Text("≈ \(left.messages >= 1000 ? "1000+" : String(Int(left.messages))) more messages like this before \(windowName(left.windowId)) runs out")
+                        .font(.caption2).foregroundStyle(left.messages < 15 ? .red : .secondary)
+                }
+                breakdown.padding(.top, 2)
             }
         }
-        .padding(8)
+        .padding(.horizontal, 8).padding(.vertical, 6)
         .background(.quinary, in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() } }
+        .help(expanded ? "" : "Click for the breakdown.")
     }
 
     private var breakdown: some View {
@@ -494,8 +480,16 @@ struct SettingsView: View {
                     .onChange(of: settings.globalShortcut) { _, on in GlobalHotkey.shared.setEnabled(on) }
                 Toggle("Show Claude Code usage by project (reads ~/.claude/projects locally)", isOn: $settings.showClaudeCode)
                     .onChange(of: settings.showClaudeCode) { _, on in if on { model.scanClaudeCode() } }
+            }
+            Section("Scheduled messages") {
                 Toggle("Keep the Mac awake while a scheduled message is waiting", isOn: $settings.keepAwakeForScheduled)
                     .onChange(of: settings.keepAwakeForScheduled) { _, _ in model.scheduler.settingsChanged() }
+                Picker("Show Claude Code runs", selection: $settings.codeRunDisplay) {
+                    Text("In the Claude app").tag("desktop")
+                    Text("In a Terminal window").tag("terminal")
+                    Text("Only in this app (Watch)").tag("app")
+                }
+                .help("Claude app: runs in the background, then shows in the chat (press ⌘R there if it was open). Terminal: an interactive Claude Code window you can type into. Only in this app: follow it with Watch in the Schedule tab.")
             }
             PowerSection(power: PowerManager.shared)
             BackupSection(backup: BackupManager.shared)
