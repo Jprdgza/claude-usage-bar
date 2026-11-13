@@ -39,12 +39,41 @@ struct MenuBarLabel: View {
 
 // MARK: Popover
 
+private struct PopoverHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct PopoverView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var scheduler: Scheduler
 
+    @State private var contentHeight: CGFloat = 0
+
+    /// The panel never grows past the screen: taller content scrolls. A ScrollView in a menu-bar
+    /// window has no height of its own, so it gets the measured content height, capped.
+    private var maxHeight: CGFloat {
+        ((NSScreen.main?.visibleFrame.height ?? 800) - 40).rounded()
+    }
+
     var body: some View {
+        ScrollView(.vertical) {
+            content
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: PopoverHeightKey.self, value: g.size.height)
+                })
+        }
+        .scrollIndicators(contentHeight > maxHeight ? .automatic : .never)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: 360, height: contentHeight > 0 ? min(contentHeight, maxHeight) : nil)
+        .onPreferenceChange(PopoverHeightKey.self) { h in
+            if abs(h - contentHeight) > 0.5 { contentHeight = h }
+        }
+        .onAppear { model.popoverOpened() }
+    }
+
+    private var content: some View {
         TimelineView(.periodic(from: .now, by: 30)) { tl in
             VStack(alignment: .leading, spacing: 12) {
                 header(now: tl.date)
@@ -76,7 +105,6 @@ struct PopoverView: View {
             .padding(14)
             .frame(width: 360)
         }
-        .onAppear { model.popoverOpened() }
     }
 
     private func header(now: Date) -> some View {
