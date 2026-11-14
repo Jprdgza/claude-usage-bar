@@ -97,6 +97,11 @@ import UsageCore
             }
         }
         Task { await checkDesktop() }
+        if settings.updateClaudeCLI {
+            Task.detached(priority: .utility) { [log] in
+                if let msg = await Scheduler.updateInstalledClaudeIfBehind() { await MainActor.run { log.add(msg) } }
+            }
+        }
     }
 
     func refreshNow() { nextDue = Date() ; if status == .sessionExpired, sessionKey != nil { status = .loading } }

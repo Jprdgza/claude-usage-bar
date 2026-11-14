@@ -512,6 +512,8 @@ struct SettingsView: View {
             Section("Scheduled messages") {
                 Toggle("Keep the Mac awake while a scheduled message is waiting", isOn: $settings.keepAwakeForScheduled)
                     .onChange(of: settings.keepAwakeForScheduled) { _, _ in model.scheduler.settingsChanged() }
+                Toggle("Keep the claude command as new as the Claude app's", isOn: $settings.updateClaudeCLI)
+                    .help("When the app starts, runs `claude update` if your claude command is older than the Claude app's copy of Claude Code. Scheduled messages always use the newer of the two.")
                 Picker("Show Claude Code runs", selection: $settings.codeRunDisplay) {
                     Text("In the Claude app").tag("desktop")
                     Text("In a Terminal window").tag("terminal")

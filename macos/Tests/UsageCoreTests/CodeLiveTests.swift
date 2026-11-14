@@ -142,4 +142,49 @@ final class CodeLiveTests: XCTestCase {
         let jobs = try d.decode([ScheduledMessage].self, from: Data(old.utf8))
         XCTAssertNil(jobs[0].continueOnRetry)
     }
+
+    func testChatContextSizeAndModel() {
+        let reply = #"{"type":"assistant","message":{"model":"claude-fable-5-2","usage":{"input_tokens":2,"cache_creation_input_tokens":3000,"cache_read_input_tokens":305000}}}"#
+        let side = #"{"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-5-5","usage":{"input_tokens":5}}}"#
+        let error = #"{"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0}}}"#
+        let info = CodeSessionCatalog.parseTail([reply, side, error].joined(separator: "\n"))
+        XCTAssertEqual(info.model, "claude-fable-5-2")
+        XCTAssertEqual(info.contextTokens, 308_002)
+        // After a compaction with no reply yet, the old size no longer applies.
+        let compacted = CodeSessionCatalog.parseTail([reply, #"{"type":"system","subtype":"compact_boundary"}"#].joined(separator: "\n"))
+        XCTAssertNil(compacted.contextTokens)
+    }
+
+    func testRunUsesTheChatsModel() {
+        var t = ScheduledMessage.CodeTarget(projectPath: "/p", projectName: "p", sessionId: "s", sessionTitle: nil,
+                                            permissionMode: "auto", model: "claude-fable-5-2")
+        let args = CodeCommand.streamArguments(target: t, session: .resume("s"))
+        XCTAssertEqual(Array(args.suffix(4)), ["--model", "claude-fable-5-2", "--resume", "s"])
+        XCTAssertTrue(CodeCommand.terminalScript(claude: "/c", target: t, session: .resume("s"), messageFile: "/m", pidFile: "/q", title: "x")
+            .contains("'--model' 'claude-fable-5-2'"))
+        t.model = "--dangerously-skip-permissions"
+        XCTAssertEqual(t.modelArguments, [], "only plain model ids are passed")
+        t.model = nil
+        XCTAssertEqual(t.modelArguments, [])
+    }
+
+    func testPicksTheNewestClaude() throws {
+        XCTAssertEqual(CodeCommand.version(fromOutput: "2.1.325 (Claude Code)\n"), [2, 1, 325])
+        XCTAssertNil(CodeCommand.version(fromOutput: "command not found"))
+        XCTAssertTrue(CodeCommand.isNewer([2, 1, 325], than: [2, 1, 296]))
+        XCTAssertTrue(CodeCommand.isNewer([2, 2], than: [2, 1, 999]))
+        XCTAssertFalse(CodeCommand.isNewer([2, 1, 296], than: [2, 1, 296]))
+
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        XCTAssertNil(CodeCommand.appBundledClaude(home: home))
+        for (v, b) in [("2.1.321", "aaa"), ("2.1.325", "bbb"), ("2.1.99", "ccc"), ("notes", "x")] {
+            let dir = "\(home)/Library/Application Support/Claude/claude-code/\(v)/\(b)/claude.app/Contents/MacOS"
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: dir + "/claude", contents: Data(), attributes: [.posixPermissions: 0o755])
+        }
+        let found = try XCTUnwrap(CodeCommand.appBundledClaude(home: home))
+        XCTAssertEqual(found.version, [2, 1, 325])
+        XCTAssertTrue(found.path.contains("/2.1.325/bbb/"))
+    }
 }

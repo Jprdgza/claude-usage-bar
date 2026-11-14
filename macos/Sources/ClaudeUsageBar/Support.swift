@@ -91,6 +91,7 @@ enum Keychain {
     @Published var lidMaxHours: Int { didSet { d.set(lidMaxHours, forKey: "lidMaxHours") } }
     /// How scheduled Claude Code runs are shown: "desktop" (headless, then opened in the Claude app),
     /// "terminal" (a Terminal window running Claude Code) or "app" (headless; watch it in the Schedule tab).
+    @Published var updateClaudeCLI: Bool { didSet { d.set(updateClaudeCLI, forKey: "updateClaudeCLI") } }
     @Published var codeRunDisplay: String { didSet { d.set(codeRunDisplay, forKey: "codeRunDisplay") } }
 
     init(defaults: UserDefaults = .standard) {
@@ -100,7 +101,7 @@ enum Keychain {
                               "checkDesktopUpdates": true, "keepAwakeForScheduled": true, "globalShortcut": true,
                               "showClaudeCode": true, "awakeWhileClaudeWorks": true, "lidClosedWhileClaudeWorks": false,
                               "lidOnlyOnPower": false, "lidBatteryFloor": 25, "lidMaxHours": 8,
-                              "codeRunDisplay": "desktop"])
+                              "codeRunDisplay": "desktop", "updateClaudeCLI": true])
         refreshSeconds = max(60, d.integer(forKey: "refreshSeconds"))
         thresholdsText = d.string(forKey: "thresholds") ?? "80, 95"
         recentChats = d.integer(forKey: "recentChats")
@@ -110,6 +111,7 @@ enum Keychain {
         resetOnlyAfterWarning = d.bool(forKey: "resetOnlyAfterWarning")
         checkDesktopUpdates = d.bool(forKey: "checkDesktopUpdates")
         keepAwakeForScheduled = d.bool(forKey: "keepAwakeForScheduled")
+        updateClaudeCLI = d.bool(forKey: "updateClaudeCLI")
         globalShortcut = d.bool(forKey: "globalShortcut")
         showClaudeCode = d.bool(forKey: "showClaudeCode")
         awakeWhileClaudeWorks = d.bool(forKey: "awakeWhileClaudeWorks")

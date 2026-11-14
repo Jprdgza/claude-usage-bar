@@ -238,7 +238,34 @@ import UsageCore
 
     /// The usual install locations first; otherwise ask the user's login shell (npm/nvm installs live
     /// on a PATH that apps started at login don't inherit).
+    /// The `claude` to run: the one on the user's PATH, unless the Claude app has a newer copy of
+    /// Claude Code. Scheduled runs then use the same version as the app's chats: an older CLI can
+    /// handle a big chat differently (e.g. compact it), at a large cost to the 5-hour limit.
     nonisolated static func findClaude() async -> String? {
+        let installed = await installedClaude()
+        guard let app = CodeCommand.appBundledClaude() else { return installed }
+        guard let installed, let v = await version(of: installed) else { return app.path }
+        return CodeCommand.isNewer(app.version, than: v) ? app.path : installed
+    }
+
+    nonisolated static func version(of exe: String) async -> [Int]? {
+        let (status, out, _) = await runProcess(exe, args: ["--version"], stdin: "", cwd: NSHomeDirectory(), timeout: 15)
+        return status == 0 ? CodeCommand.version(fromOutput: out) : nil
+    }
+
+    /// Brings the user's own `claude` up to the Claude app's version (`claude update`), when it's older.
+    nonisolated static func updateInstalledClaudeIfBehind() async -> String? {
+        guard let exe = await installedClaude(), let v = await version(of: exe),
+              let app = CodeCommand.appBundledClaude(), CodeCommand.isNewer(app.version, than: v) else { return nil }
+        let (status, out, err) = await runProcess(exe, args: ["update"], stdin: "", cwd: NSHomeDirectory(), timeout: 300)
+        let old = v.map(String.init).joined(separator: "."), new = await version(of: exe)?.map(String.init).joined(separator: ".")
+        if status == 0, let new, new != old { return "Updated the claude command from \(old) to \(new)" }
+        let why = (err.isEmpty ? out : err).split(separator: "\n").last.map(String.init) ?? "exit \(status)"
+        return "Couldn't update the claude command (\(old)): \(why). Scheduled runs use the Claude app's newer copy instead."
+    }
+
+    /// The usual install locations first; otherwise ask the user's login shell.
+    nonisolated static func installedClaude() async -> String? {
         if let p = CodeCommand.candidatePaths().first(where: { FileManager.default.isExecutableFile(atPath: $0) }) { return p }
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil } ?? "/bin/zsh"
         let (status, out, _) = await runProcess(shell, args: ["-lc", "command -v claude"], stdin: "", cwd: NSHomeDirectory(), timeout: 15)

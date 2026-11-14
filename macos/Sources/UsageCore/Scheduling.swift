@@ -44,9 +44,17 @@ public struct ScheduledMessage: Codable, Identifiable, Sendable, Equatable {
         public var sessionTitle: String?
         /// `claude --permission-mode`: "dontAsk" (only already-allowed tools), "acceptEdits", or "auto".
         public var permissionMode: String
-        public init(projectPath: String, projectName: String, sessionId: String?, sessionTitle: String?, permissionMode: String) {
+        /// The chat's own model (`claude --model`); nil = Claude Code's default.
+        public var model: String?
+        public init(projectPath: String, projectName: String, sessionId: String?, sessionTitle: String?, permissionMode: String, model: String? = nil) {
             self.projectPath = projectPath; self.projectName = projectName; self.sessionId = sessionId
-            self.sessionTitle = sessionTitle; self.permissionMode = permissionMode
+            self.sessionTitle = sessionTitle; self.permissionMode = permissionMode; self.model = model
+        }
+
+        /// `--model <id>` when the chat's model is known and looks like a model id.
+        public var modelArguments: [String] {
+            guard let m = model, m.hasPrefix("claude-"), m.allSatisfy({ $0.isLetter || $0.isNumber || "-.[]_".contains($0) }) else { return [] }
+            return ["--model", m]
         }
     }
 
@@ -80,5 +88,38 @@ public enum CodeCommand {
     /// Where the `claude` CLI usually lives (an app launched at login doesn't get the shell's PATH).
     public static func candidatePaths(home: String = NSHomeDirectory()) -> [String] {
         [home + "/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude", home + "/.claude/local/claude"]
+    }
+
+    /// "2.1.325 (Claude Code)" → [2, 1, 325].
+    public static func version(fromOutput s: String) -> [Int]? {
+        guard let word = s.split(whereSeparator: { $0 == " " || $0 == "\n" }).first(where: { $0.first?.isNumber == true }) else { return nil }
+        let parts = word.split(separator: ".").map { Int($0) }
+        guard parts.count >= 2, !parts.contains(nil) else { return nil }
+        return parts.compactMap { $0 }
+    }
+
+    public static func isNewer(_ a: [Int], than b: [Int]) -> Bool {
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    /// The Claude desktop app keeps its own copy of Claude Code, one folder per version:
+    /// …/Application Support/Claude/claude-code/<version>/<build>/claude.app/Contents/MacOS/claude.
+    /// Returns the newest one (only read and run, never changed).
+    public static func appBundledClaude(home: String = NSHomeDirectory()) -> (path: String, version: [Int])? {
+        let root = home + "/Library/Application Support/Claude/claude-code"
+        let fm = FileManager.default
+        var best: (String, [Int])?
+        for v in (try? fm.contentsOfDirectory(atPath: root)) ?? [] {
+            guard let ver = version(fromOutput: v) else { continue }
+            for build in (try? fm.contentsOfDirectory(atPath: root + "/" + v)) ?? [] {
+                let exe = "\(root)/\(v)/\(build)/claude.app/Contents/MacOS/claude"
+                if fm.isExecutableFile(atPath: exe), best.map({ isNewer(ver, than: $0.1) }) ?? true { best = (exe, ver) }
+            }
+        }
+        return best.map { (path: $0.0, version: $0.1) }
     }
 }

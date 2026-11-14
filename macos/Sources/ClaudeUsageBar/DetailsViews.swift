@@ -359,6 +359,16 @@ struct ScheduleTab: View {
             }
             .frame(maxWidth: 420)
             .help("Permissions: the same mode as this chat (\(CodeCommand.permissionMode(for: selectedSession, in: project))).")
+            if let s = selectedSession, let t = s.contextTokens, t >= CodeSession.largeContext {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("This chat is big (\(Fmt.tokens(t)) tokens). A scheduled message re-reads all of it, and Claude Code may compact it first. That can use a large part of your 5-hour limit in one go.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    Button("Use a new chat in this project instead") { sessionId = "__new__" }
+                        .buttonStyle(.link)
+                }
+                .font(.caption)
+            }
         }
     }
 
@@ -389,7 +399,8 @@ struct ScheduleTab: View {
             let session = p.sessions.first { $0.id == sessionId }
             let target = ScheduledMessage.CodeTarget(projectPath: p.path, projectName: p.name, sessionId: session?.id,
                                                      sessionTitle: session?.title,
-                                                     permissionMode: CodeCommand.permissionMode(for: session, in: p))
+                                                     permissionMode: CodeCommand.permissionMode(for: session, in: p),
+                                                     model: session?.model)
             scheduler.add(ScheduledMessage(conversationId: nil, conversationName: "\(p.name) · \(session?.title ?? "new session")",
                                            text: message, trigger: trigger, code: target))
         } else {

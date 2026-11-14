@@ -147,6 +147,12 @@ shows (Settings → Scheduled messages):
   then opens the session in the Claude desktop app with everything it did. It always goes into the
   chat you picked. The Claude app doesn't refresh a chat it already has open, so if it was open there,
   press ⌘R in the Claude app (View → Reload) to see the new messages, and don't type in it before you do.
+
+Scheduled runs use the chat's own model and the newer of your `claude` command and the Claude app's
+copy of Claude Code (an older CLI can compact a big chat, which costs a lot of the 5-hour limit). When
+the app starts it runs `claude update` if your command is behind (Settings → Scheduled messages).
+Before sending into a very big chat, the scheduler warns you: re-reading a large context uses a lot of
+the limit, so a new chat in the project is usually the cheaper choice.
 - **In a Terminal window**: at the scheduled time a Terminal window opens running interactive
   Claude Code (`claude --resume <session>`) with your message, so you can watch it and keep talking to
   it afterwards. The app follows the session log to know when it's done.

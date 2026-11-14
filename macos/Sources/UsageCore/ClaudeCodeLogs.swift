@@ -216,6 +216,14 @@ public struct CodeSession: Identifiable, Sendable, Equatable, Hashable {
     public var lastActive: Date
     /// The permission mode the chat was last used with ("auto", "acceptEdits", …), if recorded.
     public var permissionMode: String? = nil
+    /// The model the chat last used, so a scheduled message runs on the same one.
+    public var model: String? = nil
+    /// How many tokens the chat's context held at its last reply. Sending into a big chat re-reads
+    /// all of it (and Claude Code may compact it first), which can use a lot of the 5-hour limit.
+    public var contextTokens: Int? = nil
+
+    /// Above this, the scheduler warns before sending into the chat.
+    public static let largeContext = 150_000
 }
 
 public struct CodeProject: Identifiable, Sendable, Equatable, Hashable {
@@ -242,7 +250,8 @@ public enum CodeSessionCatalog {
                       let info = tailInfo(f) , let cwd = info.cwd else { continue }
                 let id = f.deletingPathExtension().lastPathComponent
                 byPath[cwd, default: []].append(CodeSession(id: id, title: info.title ?? "Session \(id.prefix(8))", lastActive: mtime,
-                                                            permissionMode: info.permissionMode))
+                                                            permissionMode: info.permissionMode, model: info.model,
+                                                            contextTokens: info.contextTokens))
             }
         }
         return byPath.compactMap { path, sessions in
@@ -255,7 +264,7 @@ public enum CodeSessionCatalog {
     }
 
     /// Last custom title (or last prompt) and the working directory, from the final ~256 KB.
-    static func tailInfo(_ url: URL) -> (title: String?, cwd: String?, permissionMode: String?)? {
+    static func tailInfo(_ url: URL) -> TailInfo? {
         guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? h.close() }
         let size = (try? h.seekToEnd()) ?? 0
@@ -264,9 +273,22 @@ public enum CodeSessionCatalog {
         return parseTail(String(decoding: data, as: UTF8.self))
     }
 
-    public static func parseTail(_ text: String) -> (title: String?, cwd: String?, permissionMode: String?) {
-        var title: String?, prompt: String?, cwd: String?, mode: String?
+    public typealias TailInfo = (title: String?, cwd: String?, permissionMode: String?, model: String?, contextTokens: Int?)
+
+    public static func parseTail(_ text: String) -> TailInfo {
+        var title: String?, prompt: String?, cwd: String?, mode: String?, model: String?, context: Int?
+        var usageDone = false
         for line in text.split(separator: "\n").reversed() {
+            // The last real reply on the main thread: its model and how big the context was.
+            // A compaction after it means the context is now small: stop looking.
+            if !usageDone, line.contains("\"compact_boundary\"") { usageDone = true }
+            if !usageDone, line.contains("\"type\":\"assistant\""), line.contains("\"usage\""), !line.contains("\"isSidechain\":true"),
+               let j = try? JSON.parse(String(line)), j["type"].string == "assistant",
+               let m = j["message"]["model"].string, !m.hasPrefix("<") {
+                let u = j["message"]["usage"]
+                let total = [u["input_tokens"], u["cache_creation_input_tokens"], u["cache_read_input_tokens"]].compactMap(\.int).reduce(0, +)
+                model = m; context = total > 0 ? total : nil; usageDone = true
+            }
             // Each user message records the mode it was sent with: "permissionMode":"auto".
             if mode == nil, let r = line.range(of: "\"permissionMode\":\"") {
                 let rest = line[r.upperBound...]
@@ -280,9 +302,9 @@ public enum CodeSessionCatalog {
             }
             if cwd == nil, line.contains("\"cwd\""),
                let o = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], let c = o["cwd"] as? String { cwd = c }
-            if title != nil, cwd != nil, mode != nil { break }
+            if title != nil, cwd != nil, mode != nil, usageDone { break }
         }
-        return (title ?? prompt, cwd, mode)
+        return (title ?? prompt, cwd, mode, model, context)
     }
 }
 

@@ -187,7 +187,7 @@ extension CodeCommand {
 
     /// Headless run that reports progress as it goes (one JSON event per line).
     public static func streamArguments(target: ScheduledMessage.CodeTarget, session: SessionMode) -> [String] {
-        ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", target.permissionMode] + session.arguments
+        ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", target.permissionMode] + target.modelArguments + session.arguments
     }
 
     /// True if the Claude desktop app has this session open: it runs its own `claude` for each open
@@ -229,7 +229,7 @@ extension CodeCommand {
         echo $$ > \(q(pidFile))
         prompt="$(cat -- \(q(messageFile)))"
         rm -f -- \(q(messageFile))
-        exec \(q(claude)) --permission-mode \(q(target.permissionMode)) \(session.arguments.map(q).joined(separator: " ")) -- "$prompt"
+        exec \(q(claude)) --permission-mode \(q(target.permissionMode)) \((target.modelArguments + session.arguments).map(q).joined(separator: " ")) -- "$prompt"
 
         """
     }
