@@ -261,7 +261,7 @@ struct ScheduleTab: View {
         HStack(alignment: .firstTextBaseline) {
             Text(sendSummary).font(.callout).foregroundStyle(.secondary)
             Spacer()
-            Button("Schedule") { schedule() }
+            Button(isLargeChat ? "Schedule anyway" : "Schedule") { schedule() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                           (destination == "chat" ? model.status == .loggedOut : project == nil))
@@ -373,6 +373,9 @@ struct ScheduleTab: View {
     }
 
     private var selectedSession: CodeSession? { project?.sessions.first { $0.id == sessionId } }
+    private var isLargeChat: Bool {
+        destination == "code" && (selectedSession?.contextTokens ?? 0) >= CodeSession.largeContext
+    }
 
     private func loadProjects() async {
         let list = await Task.detached(priority: .userInitiated) { CodeSessionCatalog.list() }.value
@@ -401,8 +404,10 @@ struct ScheduleTab: View {
                                                      sessionTitle: session?.title,
                                                      permissionMode: CodeCommand.permissionMode(for: session, in: p),
                                                      model: session?.model)
-            scheduler.add(ScheduledMessage(conversationId: nil, conversationName: "\(p.name) · \(session?.title ?? "new session")",
-                                           text: message, trigger: trigger, code: target))
+            var job = ScheduledMessage(conversationId: nil, conversationName: "\(p.name) · \(session?.title ?? "new session")",
+                                       text: message, trigger: trigger, code: target)
+            job.allowLargeContext = isLargeChat ? true : nil
+            scheduler.add(job)
         } else {
             let chat = chats.first { $0.id == chatId }
             scheduler.add(ScheduledMessage(conversationId: chat?.id, conversationName: chat.map { $0.name.isEmpty ? "Untitled" : $0.name } ?? "New chat",
@@ -435,8 +440,13 @@ struct JobRow: View {
                     Button("Cancel") { scheduler.cancel(job.id) }
                 }
                 if job.state == .failed {
-                    Button(job.sentAt != nil ? "Send again" : "Retry now") { scheduler.sendNow(job.id) }
-                        .help(job.sentAt != nil ? "Check the chat first: part of it may already have gone through." : "")
+                    if job.detail?.contains("has grown to") == true, job.detail?.hasPrefix(Scheduler.sizeStop) == true {
+                        Button("Send anyway") { scheduler.sendNow(job.id, allowLarge: true) }
+                            .help("Sends into the big chat even though re-reading it uses a lot of the 5-hour limit.")
+                    } else {
+                        Button(job.sentAt != nil ? "Send again" : "Retry now") { scheduler.sendNow(job.id) }
+                            .help(job.sentAt != nil ? "Check the chat first: part of it may already have gone through." : "")
+                    }
                 }
                 if job.isClaudeCode, scheduler.live[job.id] != nil { Button(job.state.isActive ? "Watch" : "Show what happened") { watching = true } }
                 if job.isClaudeCode, job.code?.sessionId != nil, !job.state.isActive {

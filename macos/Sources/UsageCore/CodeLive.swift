@@ -234,3 +234,36 @@ extension CodeCommand {
         """
     }
 }
+
+// MARK: Checking a chat before sending into it
+
+extension CodeCommand {
+    /// The context window from `/context`'s report: "**Tokens:** 12.4k / 1m (1%)" → 1,000,000.
+    public static func contextWindow(fromContextReport s: String) -> Int? {
+        guard let re = try? NSRegularExpression(pattern: #"Tokens:\**\s*[\d.,]+[km]?\s*/\s*([\d.,]+)\s*([km]?)"#, options: .caseInsensitive),
+              let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+              let numR = Range(m.range(at: 1), in: s), let n = Double(s[numR].replacingOccurrences(of: ",", with: "")) else { return nil }
+        let unit = Range(m.range(at: 2), in: s).map { s[$0].lowercased() } ?? ""
+        return Int(n * (unit == "m" ? 1_000_000 : unit == "k" ? 1_000 : 1))
+    }
+
+    public enum Preflight: Equatable, Sendable {
+        case ok
+        /// Claude Code would compact the chat before answering: it re-reads all of it to summarize it.
+        case wouldCompact(tokens: Int, window: Int)
+        /// A big chat the user didn't confirm when scheduling (or that grew big since).
+        case large(tokens: Int)
+    }
+
+    /// Whether sending into a chat of `chatTokens` is safe for the 5-hour limit. Claude Code compacts
+    /// when the context gets within its buffer (~33K) of the window; an unknown window is taken as
+    /// 200K, the smallest one, so the check fails safe.
+    public static func preflight(chatTokens: Int?, window: Int?, allowLarge: Bool) -> Preflight {
+        guard let t = chatTokens else { return .ok }
+        let w = window ?? 200_000
+        if t + 45_000 >= w { return .wouldCompact(tokens: t, window: w) }
+        if t >= CodeSession.largeContext, !allowLarge { return .large(tokens: t) }
+        return .ok
+    }
+}
+

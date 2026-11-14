@@ -187,4 +187,21 @@ final class CodeLiveTests: XCTestCase {
         XCTAssertEqual(found.version, [2, 1, 325])
         XCTAssertTrue(found.path.contains("/2.1.325/bbb/"))
     }
+
+    func testPreflightProtectsTheLimit() {
+        XCTAssertEqual(CodeCommand.contextWindow(fromContextReport: "## Context Usage\n\n**Model:** x  \n**Tokens:** 12.4k / 1m (1%)"), 1_000_000)
+        XCTAssertEqual(CodeCommand.contextWindow(fromContextReport: "**Tokens:** 150,300 / 200k (75%)"), 200_000)
+        XCTAssertNil(CodeCommand.contextWindow(fromContextReport: "Unknown command"))
+
+        // Last night's case: a 308K chat on a CLI with a 200K window would compact.
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 200_000, allowLarge: true), .wouldCompact(tokens: 308_376, window: 200_000))
+        // Unknown window: assume the small one.
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 170_000, window: nil, allowLarge: true), .wouldCompact(tokens: 170_000, window: 200_000))
+        // 1M window: big but not compacting; sent only if the user confirmed.
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 1_000_000, allowLarge: false), .large(tokens: 308_376))
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 1_000_000, allowLarge: true), .ok)
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 960_000, window: 1_000_000, allowLarge: true), .wouldCompact(tokens: 960_000, window: 1_000_000))
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 40_000, window: nil, allowLarge: false), .ok)
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: nil, window: nil, allowLarge: false), .ok)
+    }
 }

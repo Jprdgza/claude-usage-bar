@@ -264,7 +264,7 @@ public enum CodeSessionCatalog {
     }
 
     /// Last custom title (or last prompt) and the working directory, from the final ~256 KB.
-    static func tailInfo(_ url: URL) -> TailInfo? {
+    public static func tailInfo(_ url: URL) -> TailInfo? {
         guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? h.close() }
         let size = (try? h.seekToEnd()) ?? 0
