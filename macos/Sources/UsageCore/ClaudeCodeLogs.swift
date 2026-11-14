@@ -218,12 +218,9 @@ public struct CodeSession: Identifiable, Sendable, Equatable, Hashable {
     public var permissionMode: String? = nil
     /// The model the chat last used, so a scheduled message runs on the same one.
     public var model: String? = nil
-    /// How many tokens the chat's context held at its last reply. Sending into a big chat re-reads
-    /// all of it (and Claude Code may compact it first), which can use a lot of the 5-hour limit.
+    /// How many tokens the chat's context held at its last reply (to tell whether Claude Code
+    /// would have to compact it before answering).
     public var contextTokens: Int? = nil
-
-    /// Above this, the scheduler warns before sending into the chat.
-    public static let largeContext = 150_000
 }
 
 public struct CodeProject: Identifiable, Sendable, Equatable, Hashable {

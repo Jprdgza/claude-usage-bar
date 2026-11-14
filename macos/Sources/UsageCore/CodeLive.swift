@@ -251,18 +251,16 @@ extension CodeCommand {
         case ok
         /// Claude Code would compact the chat before answering: it re-reads all of it to summarize it.
         case wouldCompact(tokens: Int, window: Int)
-        /// A big chat the user didn't confirm when scheduling (or that grew big since).
-        case large(tokens: Int)
     }
 
-    /// Whether sending into a chat of `chatTokens` is safe for the 5-hour limit. Claude Code compacts
+    /// Whether sending into a chat of `chatTokens` is safe for the 5-hour limit. A big chat alone is
+    /// fine; compacting is what's expensive (it re-reads the whole chat to write a summary). Claude Code compacts
     /// when the context gets within its buffer (~33K) of the window; an unknown window is taken as
     /// 200K, the smallest one, so the check fails safe.
-    public static func preflight(chatTokens: Int?, window: Int?, allowLarge: Bool) -> Preflight {
+    public static func preflight(chatTokens: Int?, window: Int?) -> Preflight {
         guard let t = chatTokens else { return .ok }
         let w = window ?? 200_000
         if t + 45_000 >= w { return .wouldCompact(tokens: t, window: w) }
-        if t >= CodeSession.largeContext, !allowLarge { return .large(tokens: t) }
         return .ok
     }
 }

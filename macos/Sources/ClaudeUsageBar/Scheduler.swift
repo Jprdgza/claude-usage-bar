@@ -72,12 +72,8 @@ import UsageCore
     func clearFinished() { jobs.removeAll { !$0.state.isActive }; save() }
 
     /// Sends a waiting job right away (also how to test the whole flow).
-    /// Prefix of the message when a run was stopped because the chat is big.
-    static let sizeStop = "Not sent, to protect your limit"
-
-    func sendNow(_ id: UUID, allowLarge: Bool = false) {
+    func sendNow(_ id: UUID) {
         guard let i = jobs.firstIndex(where: { $0.id == id }), jobs[i].state == .waiting || jobs[i].state == .failed else { return }
-        if allowLarge { jobs[i].allowLargeContext = true }
         jobs[i].state = .waiting; jobs[i].fireAt = Date(); jobs[i].detail = nil
         jobs[i].attempts = 0   // a manual send gets a fresh retry budget
         save(); tick()
@@ -188,16 +184,13 @@ import UsageCore
         let exists = target.sessionId.map { SessionTurn.logFile(sessionId: $0) != nil } ?? false
         let session: CodeCommand.SessionMode = exists ? .resume(target.sessionId!) : .new(target.sessionId ?? UUID().uuidString.lowercased())
         let sessionId = session.id
-        // Protect the 5-hour limit: measure the chat now (it may have grown since it was scheduled).
+        // Protect the 5-hour limit: if Claude Code would have to compact the chat before answering
+        // (it re-reads all of it to summarize), don't send. Measured now: it may have grown since.
         if exists, let log = SessionTurn.logFile(sessionId: sessionId),
            let tokens = CodeSessionCatalog.tailInfo(log)?.contextTokens {
             let window = tokens >= 100_000 ? await Self.contextWindow(exe: exe, model: target.model) : nil
-            switch CodeCommand.preflight(chatTokens: tokens, window: window, allowLarge: j.allowLargeContext == true) {
-            case .ok: break
-            case .wouldCompact(let t, let w):
-                return fail(id, "\(Self.sizeStop): this chat holds \(Fmt.tokens(t)) tokens, and Claude Code would compact it first (window \(Fmt.tokens(w))), re-reading all of it. Run /compact in the chat yourself, or schedule into a new chat.")
-            case .large(let t):
-                return fail(id, "\(Self.sizeStop): this chat has grown to \(Fmt.tokens(t)) tokens, and re-reading it would use a lot of the 5-hour limit. Schedule it into a new chat, or press Send anyway.")
+            if case .wouldCompact(let t, let w) = CodeCommand.preflight(chatTokens: tokens, window: window) {
+                return fail(id, "Not sent, to protect your limit: this chat holds \(Fmt.tokens(t)) tokens, and Claude Code would compact it first (window \(Fmt.tokens(w))), re-reading all of it. Run /compact in the chat yourself, or schedule into a new chat.")
             }
         }
         let openInApp = exists ? await Self.desktopHolds(sessionId) : false

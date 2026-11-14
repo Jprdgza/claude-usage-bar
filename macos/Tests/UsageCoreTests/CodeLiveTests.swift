@@ -194,14 +194,13 @@ final class CodeLiveTests: XCTestCase {
         XCTAssertNil(CodeCommand.contextWindow(fromContextReport: "Unknown command"))
 
         // Last night's case: a 308K chat on a CLI with a 200K window would compact.
-        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 200_000, allowLarge: true), .wouldCompact(tokens: 308_376, window: 200_000))
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 200_000), .wouldCompact(tokens: 308_376, window: 200_000))
         // Unknown window: assume the small one.
-        XCTAssertEqual(CodeCommand.preflight(chatTokens: 170_000, window: nil, allowLarge: true), .wouldCompact(tokens: 170_000, window: 200_000))
-        // 1M window: big but not compacting; sent only if the user confirmed.
-        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 1_000_000, allowLarge: false), .large(tokens: 308_376))
-        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 1_000_000, allowLarge: true), .ok)
-        XCTAssertEqual(CodeCommand.preflight(chatTokens: 960_000, window: 1_000_000, allowLarge: true), .wouldCompact(tokens: 960_000, window: 1_000_000))
-        XCTAssertEqual(CodeCommand.preflight(chatTokens: 40_000, window: nil, allowLarge: false), .ok)
-        XCTAssertEqual(CodeCommand.preflight(chatTokens: nil, window: nil, allowLarge: false), .ok)
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 170_000, window: nil), .wouldCompact(tokens: 170_000, window: 200_000))
+        // 1M window: a big chat is fine.
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 308_376, window: 1_000_000), .ok)
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 960_000, window: 1_000_000), .wouldCompact(tokens: 960_000, window: 1_000_000))
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: 40_000, window: nil), .ok)
+        XCTAssertEqual(CodeCommand.preflight(chatTokens: nil, window: nil), .ok)
     }
 }

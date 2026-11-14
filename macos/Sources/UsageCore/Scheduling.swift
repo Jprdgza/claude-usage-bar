@@ -35,8 +35,6 @@ public struct ScheduledMessage: Codable, Identifiable, Sendable, Equatable {
     /// Set after a Claude Code run hit the usage limit: the next try asks it to continue instead of
     /// pasting the whole message into the conversation again.
     public var continueOnRetry: Bool?
-    /// The user saw the big-chat warning and scheduled anyway.
-    public var allowLargeContext: Bool?
 
     public struct CodeTarget: Codable, Sendable, Equatable {
         public var projectPath: String
