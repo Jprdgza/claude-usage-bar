@@ -39,6 +39,29 @@ struct MenuBarLabel: View {
 
 // MARK: Popover
 
+/// The menu-bar panel grows when its content does but doesn't always shrink back, leaving an empty
+/// strip below the content. This sets the panel's height to the content's, keeping its top edge
+/// under the menu bar.
+private struct PanelSizer: NSViewRepresentable {
+    let height: CGFloat?
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard let height else { return }
+        DispatchQueue.main.async {
+            guard let window = view.window, let content = window.contentView else { return }
+            let chrome = window.frame.height - content.frame.height
+            let target = (height + chrome).rounded()
+            guard abs(window.frame.height - target) > 1 else { return }
+            var f = window.frame
+            f.origin.y = f.maxY - target
+            f.size.height = target
+            window.setFrame(f, display: true)
+        }
+    }
+}
+
 private struct PopoverHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -67,6 +90,7 @@ struct PopoverView: View {
         .scrollIndicators(contentHeight > maxHeight ? .automatic : .never)
         .scrollBounceBehavior(.basedOnSize)
         .frame(width: 360, height: contentHeight > 0 ? min(contentHeight, maxHeight) : nil)
+        .background(PanelSizer(height: contentHeight > 0 ? min(contentHeight, maxHeight) : nil))
         .onPreferenceChange(PopoverHeightKey.self) { h in
             if abs(h - contentHeight) > 0.5 { contentHeight = h }
         }
